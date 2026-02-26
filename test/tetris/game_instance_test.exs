@@ -2,11 +2,20 @@ defmodule Tetris.GameInstanceTest do
   use ExUnit.Case
 
   alias Tetris.GameInstance
+  alias Tetris.Core.Field
 
   defp start_instance(opts \\ []) do
     game_id = System.unique_integer([:positive])
     opts = Keyword.merge([game_id: game_id, tick_time: 60_000], opts)
     start_supervised!({GameInstance, opts})
+  end
+
+  # Sends a :tick message and waits for it to be processed by
+  # making a synchronous call afterwards.
+  defp send_tick(pid) do
+    send(pid, :tick)
+    _ = :sys.get_state(pid)
+    :ok
   end
 
   describe "start_link/1" do
@@ -224,5 +233,127 @@ defmodule Tetris.GameInstanceTest do
       assert new_ref != nil
       assert new_ref != old_ref
     end
+  end
+
+  describe "tick handler" do
+    test "tick moves shape down by 1 when placement is valid" do
+      pid = start_instance(width: 10, height: 20)
+      {_x, y_before} = :sys.get_state(pid).current_shape_coords
+
+      send_tick(pid)
+
+      {_x, y_after} = :sys.get_state(pid).current_shape_coords
+      assert y_after == y_before + 1
+    end
+
+    test "tick preserves x coordinate" do
+      pid = start_instance(width: 10, height: 20)
+      {x_before, _y} = :sys.get_state(pid).current_shape_coords
+
+      send_tick(pid)
+
+      {x_after, _y} = :sys.get_state(pid).current_shape_coords
+      assert x_after == x_before
+    end
+
+    test "tick schedules a new tick timer" do
+      pid = start_instance(width: 10, height: 20)
+      old_ref = :sys.get_state(pid).tick_ref
+
+      send_tick(pid)
+
+      new_ref = :sys.get_state(pid).tick_ref
+      assert new_ref != nil
+      assert new_ref != old_ref
+    end
+
+    test "tick keeps status as :live when shape moves down" do
+      pid = start_instance(width: 10, height: 20)
+
+      send_tick(pid)
+
+      assert :sys.get_state(pid).status == :live
+    end
+
+    test "shape is captured and new shape spawned when it cannot move down" do
+      pid = start_instance(width: 10, height: 20)
+      state = :sys.get_state(pid)
+      shape = state.current_shape
+      {x, _y} = state.current_shape_coords
+
+      # Position the shape so the next tick would push it past the bottom.
+      # Find the max y in the shape coords, then set offset so max_y + offset + 1 == height
+      max_shape_y =
+        shape.coords
+        |> Enum.map(fn [_sx, sy] -> round(sy + 0.1) end)
+        |> Enum.max()
+
+      bottom_y = state.field.height - 1 - max_shape_y
+
+      :sys.replace_state(pid, fn s ->
+        %{s | current_shape_coords: {x, bottom_y}}
+      end)
+
+      send_tick(pid)
+
+      new_state = :sys.get_state(pid)
+      # A new shape should have been spawned — coords reset to starting position
+      {new_x, new_y} = new_state.current_shape_coords
+      {expected_x, expected_y} = Field.starting_position(new_state.field, new_state.current_shape)
+      assert new_x == expected_x
+      assert new_y == expected_y
+      assert new_state.status == :live
+      assert new_state.tick_ref != nil
+    end
+
+    test "game over when shape cannot move down and sits at or above row 0" do
+      pid = start_instance(width: 10, height: 20)
+      {x, _y} = :sys.get_state(pid).current_shape_coords
+
+      # Place shape at y=0 so its cells are at or above row 0.
+      # The shape can't move down because we'll fill the row below.
+      # When can_place? fails at y+1=1, the game_over? check sees cells at y<=0.
+      :sys.replace_state(pid, fn s ->
+        %{s | current_shape_coords: {x, 0}, field: fill_field_except_top_row(s.field)}
+      end)
+
+      send_tick(pid)
+
+      new_state = :sys.get_state(pid)
+      assert new_state.status == :over
+      assert new_state.tick_ref == nil
+    end
+
+    test "multiple ticks move shape progressively downward" do
+      pid = start_instance(width: 10, height: 20)
+      {_x, y_start} = :sys.get_state(pid).current_shape_coords
+
+      send_tick(pid)
+      send_tick(pid)
+      send_tick(pid)
+
+      {_x, y_after} = :sys.get_state(pid).current_shape_coords
+      assert y_after == y_start + 3
+    end
+
+    test "tick does not change the current shape identity while falling" do
+      pid = start_instance(width: 10, height: 20)
+      shape_before = :sys.get_state(pid).current_shape
+
+      send_tick(pid)
+
+      shape_after = :sys.get_state(pid).current_shape
+      assert shape_before == shape_after
+    end
+  end
+
+  # Fills all rows of the field with 1s except the top row (row 0).
+  defp fill_field_except_top_row(%Field{width: width, height: height} = field) do
+    cells =
+      for row <- 0..(height - 1) do
+        if row == 0, do: List.duplicate(0, width), else: List.duplicate(1, width)
+      end
+
+    %Field{field | cells: cells}
   end
 end

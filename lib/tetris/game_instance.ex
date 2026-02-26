@@ -136,7 +136,40 @@ defmodule Tetris.GameInstance do
   end
 
   @impl true
-  def handle_info(:tick, state) do
-    {:noreply, state}
+  def handle_info(:tick, %__MODULE__{} = state) do
+    %__MODULE__{
+      field: field,
+      current_shape: shape,
+      current_shape_coords: {x, y},
+      tick_time: tick_time
+    } = state
+
+    new_y = y + 1
+
+    if Field.can_place?(field, shape, x, new_y) do
+      tick_ref = Process.send_after(self(), :tick, tick_time)
+      {:noreply, %{state | current_shape_coords: {x, new_y}, tick_ref: tick_ref}}
+    else
+      if game_over?(shape, x, y) do
+        {:noreply, %{state | status: :over, tick_ref: nil}}
+      else
+        {_rows_cleared, new_field} = Field.capture(field, shape, x, y)
+        new_shape = ShapeRepository.select_random_shape()
+        {new_x, new_y} = Field.starting_position(new_field, new_shape)
+        tick_ref = Process.send_after(self(), :tick, tick_time)
+
+        {:noreply,
+         %{state |
+           field: new_field,
+           current_shape: new_shape,
+           current_shape_coords: {new_x, new_y},
+           tick_ref: tick_ref
+         }}
+      end
+    end
+  end
+
+  defp game_over?(%Shape{coords: coords}, _offset_x, offset_y) do
+    Enum.any?(coords, fn [_x, y] -> round(y + offset_y + 0.1) <= 0 end)
   end
 end
