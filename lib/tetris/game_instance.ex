@@ -101,8 +101,46 @@ defmodule Tetris.GameInstance do
     end
   end
 
-  def handle_call(:drop_shape, _from, state) do
-    {:reply, :ok, state}
+  def handle_call(:drop_shape, _from, %__MODULE__{status: :over} = state) do
+    {:reply, {:error, :game_over}, state}
+  end
+
+  def handle_call(:drop_shape, _from, %__MODULE__{status: :paused} = state) do
+    {:reply, {:error, :paused}, state}
+  end
+
+  def handle_call(:drop_shape, _from, %__MODULE__{status: :live} = state) do
+    %__MODULE__{
+      field: field,
+      current_shape: shape,
+      current_shape_coords: {x, y},
+      tick_time: tick_time,
+      tick_ref: tick_ref
+    } = state
+
+    # 1. Stop the current tick timer
+    if tick_ref, do: Process.cancel_timer(tick_ref)
+
+    # 2. Find the lowest valid y by progressively increasing y
+    final_y = drop_to_bottom(field, shape, x, y)
+
+    # 3. Check for game over
+    if game_over?(shape, x, final_y) do
+      {:reply, :ok, %{state | status: :over, tick_ref: nil}}
+    else
+      {_rows_cleared, new_field} = Field.capture(field, shape, x, final_y)
+      new_shape = ShapeRepository.select_random_shape()
+      {new_x, new_y} = Field.starting_position(new_field, new_shape)
+      new_tick_ref = Process.send_after(self(), :tick, tick_time)
+
+      {:reply, :ok,
+       %{state |
+         field: new_field,
+         current_shape: new_shape,
+         current_shape_coords: {new_x, new_y},
+         tick_ref: new_tick_ref
+       }}
+    end
   end
 
   def handle_call(:pause, _from, %__MODULE__{status: :over} = state) do
@@ -166,6 +204,16 @@ defmodule Tetris.GameInstance do
            tick_ref: tick_ref
          }}
       end
+    end
+  end
+
+  defp drop_to_bottom(field, shape, x, y) do
+    new_y = y + 1
+
+    if Field.can_place?(field, shape, x, new_y) do
+      drop_to_bottom(field, shape, x, new_y)
+    else
+      y
     end
   end
 

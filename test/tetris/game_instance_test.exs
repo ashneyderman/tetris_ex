@@ -235,6 +235,103 @@ defmodule Tetris.GameInstanceTest do
     end
   end
 
+  describe "drop_shape/1" do
+    test "drop_shape returns :ok on a live game" do
+      pid = start_instance(width: 10, height: 20)
+      assert :ok = GameInstance.drop_shape(pid)
+    end
+
+    test "drop_shape returns {:error, :game_over} when game is over" do
+      pid = start_instance()
+      :sys.replace_state(pid, fn state -> %{state | status: :over} end)
+
+      assert {:error, :game_over} = GameInstance.drop_shape(pid)
+    end
+
+    test "drop_shape returns {:error, :paused} when game is paused" do
+      pid = start_instance()
+      GameInstance.pause(pid)
+
+      assert {:error, :paused} = GameInstance.drop_shape(pid)
+    end
+
+    test "drop_shape cancels the current tick timer" do
+      pid = start_instance(width: 10, height: 20)
+      old_ref = :sys.get_state(pid).tick_ref
+      assert old_ref != nil
+
+      GameInstance.drop_shape(pid)
+
+      new_ref = :sys.get_state(pid).tick_ref
+      assert new_ref != old_ref
+    end
+
+    test "drop_shape captures the shape and spawns a new one" do
+      pid = start_instance(width: 10, height: 20)
+      state = :sys.get_state(pid)
+      GameInstance.drop_shape(pid)
+
+      new_state = :sys.get_state(pid)
+      # New shape is at its starting position
+      {new_x, new_y} = new_state.current_shape_coords
+      {expected_x, expected_y} = Field.starting_position(new_state.field, new_state.current_shape)
+      assert new_x == expected_x
+      assert new_y == expected_y
+      # The field should have changed (shape was captured)
+      assert new_state.field != state.field
+    end
+
+    test "drop_shape places shape at the bottom of the field" do
+      pid = start_instance(width: 10, height: 20)
+      GameInstance.drop_shape(pid)
+
+      new_state = :sys.get_state(pid)
+      # The old shape's cells should now be at the bottom of the field
+      # Check that the bottom rows of the field have some occupied cells
+      bottom_row = Enum.at(new_state.field.cells, new_state.field.height - 1)
+      assert Enum.any?(bottom_row, fn cell -> cell == 1 end)
+    end
+
+    test "drop_shape starts a new tick timer" do
+      pid = start_instance(width: 10, height: 20)
+
+      GameInstance.drop_shape(pid)
+
+      new_state = :sys.get_state(pid)
+      assert new_state.tick_ref != nil
+      assert new_state.status == :live
+    end
+
+    test "drop_shape results in game over when field is nearly full" do
+      pid = start_instance(width: 10, height: 20)
+      state = :sys.get_state(pid)
+      {x, _y} = state.current_shape_coords
+
+      # Fill entire field except row 0 — shape starts above field,
+      # dropping lands it at row 0 or above, triggering game over.
+      :sys.replace_state(pid, fn s ->
+        %{s |
+          current_shape_coords: {x, 0},
+          field: fill_field_except_top_row(s.field)
+        }
+      end)
+
+      assert :ok = GameInstance.drop_shape(pid)
+
+      new_state = :sys.get_state(pid)
+      assert new_state.status == :over
+      assert new_state.tick_ref == nil
+    end
+
+    test "drop_shape keeps status :live when shape lands safely" do
+      pid = start_instance(width: 10, height: 20)
+
+      GameInstance.drop_shape(pid)
+
+      assert :sys.get_state(pid).status == :live
+    end
+  end
+
   describe "tick handler" do
     test "tick moves shape down by 1 when placement is valid" do
       pid = start_instance(width: 10, height: 20)
