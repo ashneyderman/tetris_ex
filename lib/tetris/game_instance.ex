@@ -16,7 +16,9 @@ defmodule Tetris.GameInstance do
             current_shape_coords: {0, 0},
             status: :paused,
             tick_time: 1000,
-            tick_ref: nil
+            tick_ref: nil,
+            score: 0,
+            rows_cleared: 0
 
   def start_link(opts) do
     game_id = Keyword.get(opts, :game_id, 0)
@@ -128,7 +130,7 @@ defmodule Tetris.GameInstance do
     if game_over?(shape, x, final_y) do
       {:reply, :ok, %{state | status: :over, tick_ref: nil}}
     else
-      {_rows_cleared, new_field} = Field.capture(field, shape, x, final_y)
+      {cleared, new_field} = Field.capture(field, shape, x, final_y)
       new_shape = ShapeRepository.select_random_shape()
       {new_x, new_y} = Field.starting_position(new_field, new_shape)
       new_tick_ref = Process.send_after(self(), :tick, tick_time)
@@ -138,7 +140,9 @@ defmodule Tetris.GameInstance do
          field: new_field,
          current_shape: new_shape,
          current_shape_coords: {new_x, new_y},
-         tick_ref: new_tick_ref
+         tick_ref: new_tick_ref,
+         score: state.score + cleared * cleared,
+         rows_cleared: state.rows_cleared + cleared
        }}
     end
   end
@@ -191,7 +195,7 @@ defmodule Tetris.GameInstance do
       if game_over?(shape, x, y) do
         {:noreply, %{state | status: :over, tick_ref: nil}}
       else
-        {_rows_cleared, new_field} = Field.capture(field, shape, x, y)
+        {cleared, new_field} = Field.capture(field, shape, x, y)
         new_shape = ShapeRepository.select_random_shape()
         {new_x, new_y} = Field.starting_position(new_field, new_shape)
         tick_ref = Process.send_after(self(), :tick, tick_time)
@@ -201,7 +205,9 @@ defmodule Tetris.GameInstance do
            field: new_field,
            current_shape: new_shape,
            current_shape_coords: {new_x, new_y},
-           tick_ref: tick_ref
+           tick_ref: tick_ref,
+           score: state.score + cleared * cleared,
+           rows_cleared: state.rows_cleared + cleared
          }}
       end
     end

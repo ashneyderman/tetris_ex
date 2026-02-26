@@ -3,6 +3,7 @@ defmodule Tetris.GameInstanceTest do
 
   alias Tetris.GameInstance
   alias Tetris.Core.Field
+  alias Tetris.Core.Shape
 
   defp start_instance(opts \\ []) do
     game_id = System.unique_integer([:positive])
@@ -329,6 +330,140 @@ defmodule Tetris.GameInstanceTest do
       GameInstance.drop_shape(pid)
 
       assert :sys.get_state(pid).status == :live
+    end
+  end
+
+  describe "scoring" do
+    test "score and rows_cleared start at 0" do
+      pid = start_instance(width: 10, height: 20)
+      state = :sys.get_state(pid)
+      assert state.score == 0
+      assert state.rows_cleared == 0
+    end
+
+    test "drop that clears no rows does not change score" do
+      pid = start_instance(width: 10, height: 20)
+
+      GameInstance.drop_shape(pid)
+
+      state = :sys.get_state(pid)
+      assert state.score == 0
+      assert state.rows_cleared == 0
+    end
+
+    test "drop that clears 1 row adds 1 to score" do
+      pid = start_instance(width: 4, height: 6)
+
+      # Use a single-cell shape and fill all but one cell in the bottom row
+      dot = %Shape{label: :dot, coords: [[0, 0]]}
+
+      :sys.replace_state(pid, fn s ->
+        cells =
+          List.duplicate(List.duplicate(0, 4), 5) ++
+            [[1, 1, 1, 0]]
+
+        %{s |
+          current_shape: dot,
+          current_shape_coords: {3, 0},
+          field: %{s.field | cells: cells}
+        }
+      end)
+
+      GameInstance.drop_shape(pid)
+
+      state = :sys.get_state(pid)
+      assert state.rows_cleared == 1
+      assert state.score == 1
+    end
+
+    test "drop that clears 2 rows adds 4 to score" do
+      pid = start_instance(width: 4, height: 6)
+
+      # A 2-cell tall shape to complete 2 rows at once
+      bar = %Shape{label: :bar, coords: [[0, 0], [0, 1]]}
+
+      :sys.replace_state(pid, fn s ->
+        cells =
+          List.duplicate(List.duplicate(0, 4), 4) ++
+            [[1, 1, 1, 0], [1, 1, 1, 0]]
+
+        %{s |
+          current_shape: bar,
+          current_shape_coords: {3, 0},
+          field: %{s.field | cells: cells}
+        }
+      end)
+
+      GameInstance.drop_shape(pid)
+
+      state = :sys.get_state(pid)
+      assert state.rows_cleared == 2
+      assert state.score == 4
+    end
+
+    test "score accumulates across multiple drops" do
+      pid = start_instance(width: 4, height: 6)
+      dot = %Shape{label: :dot, coords: [[0, 0]]}
+
+      # First drop: clears 1 row (score += 1)
+      :sys.replace_state(pid, fn s ->
+        cells =
+          List.duplicate(List.duplicate(0, 4), 5) ++
+            [[1, 1, 1, 0]]
+
+        %{s |
+          current_shape: dot,
+          current_shape_coords: {3, 0},
+          field: %{s.field | cells: cells}
+        }
+      end)
+
+      GameInstance.drop_shape(pid)
+
+      assert :sys.get_state(pid).score == 1
+      assert :sys.get_state(pid).rows_cleared == 1
+
+      # Second drop: clears 1 more row (score += 1, total 2)
+      :sys.replace_state(pid, fn s ->
+        cells =
+          List.duplicate(List.duplicate(0, 4), 5) ++
+            [[1, 1, 1, 0]]
+
+        %{s |
+          current_shape: dot,
+          current_shape_coords: {3, 0},
+          field: %{s.field | cells: cells}
+        }
+      end)
+
+      GameInstance.drop_shape(pid)
+
+      assert :sys.get_state(pid).score == 2
+      assert :sys.get_state(pid).rows_cleared == 2
+    end
+
+    test "tick that captures shape also updates score" do
+      pid = start_instance(width: 4, height: 6)
+      dot = %Shape{label: :dot, coords: [[0, 0]]}
+
+      :sys.replace_state(pid, fn s ->
+        cells =
+          List.duplicate(List.duplicate(0, 4), 5) ++
+            [[1, 1, 1, 0]]
+
+        # Place dot at bottom row so next tick can't move down, triggering capture
+        %{s |
+          current_shape: dot,
+          current_shape_coords: {3, 5},
+          field: %{s.field | cells: cells}
+        }
+      end)
+
+      send_tick(pid)
+
+      state = :sys.get_state(pid)
+      assert state.rows_cleared == 1
+      assert state.score == 1
     end
   end
 
