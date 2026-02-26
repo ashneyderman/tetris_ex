@@ -105,11 +105,29 @@ defmodule Tetris.GameInstance do
     {:reply, :ok, state}
   end
 
-  def handle_call(:pause, _from, state) do
+  def handle_call(:pause, _from, %__MODULE__{status: :over} = state) do
+    {:reply, {:error, :game_over}, state}
+  end
+
+  def handle_call(:pause, _from, %__MODULE__{status: :live, tick_ref: tick_ref} = state) do
+    if tick_ref, do: Process.cancel_timer(tick_ref)
+    {:reply, :ok, %{state | status: :paused, tick_ref: nil}}
+  end
+
+  def handle_call(:pause, _from, %__MODULE__{status: :paused} = state) do
     {:reply, :ok, state}
   end
 
-  def handle_call(:unpause, _from, state) do
+  def handle_call(:unpause, _from, %__MODULE__{status: :over} = state) do
+    {:reply, {:error, :game_over}, state}
+  end
+
+  def handle_call(:unpause, _from, %__MODULE__{status: :paused, tick_time: tick_time} = state) do
+    tick_ref = Process.send_after(self(), :tick, tick_time)
+    {:reply, :ok, %{state | status: :live, tick_ref: tick_ref}}
+  end
+
+  def handle_call(:unpause, _from, %__MODULE__{status: :live} = state) do
     {:reply, :ok, state}
   end
 

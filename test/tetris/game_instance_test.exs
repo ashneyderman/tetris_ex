@@ -141,4 +141,88 @@ defmodule Tetris.GameInstanceTest do
       assert Enum.any?(results, fn r -> r == {:error, :unable_to_shift} end)
     end
   end
+
+  describe "pause/1" do
+    test "pausing a live game sets status to :paused" do
+      pid = start_instance()
+      assert GameInstance.status(pid) == :live
+
+      assert :ok = GameInstance.pause(pid)
+      assert GameInstance.status(pid) == :paused
+    end
+
+    test "pausing cancels the tick timer" do
+      pid = start_instance()
+      assert :sys.get_state(pid).tick_ref != nil
+
+      GameInstance.pause(pid)
+
+      assert :sys.get_state(pid).tick_ref == nil
+    end
+
+    test "pausing an already paused game is a no-op" do
+      pid = start_instance()
+      GameInstance.pause(pid)
+
+      assert :ok = GameInstance.pause(pid)
+      assert GameInstance.status(pid) == :paused
+    end
+
+    test "pausing a game over game returns {:error, :game_over}" do
+      pid = start_instance()
+      :sys.replace_state(pid, fn state -> %{state | status: :over} end)
+
+      assert {:error, :game_over} = GameInstance.pause(pid)
+      assert :sys.get_state(pid).status == :over
+    end
+  end
+
+  describe "unpause/1" do
+    test "unpausing a paused game sets status to :live" do
+      pid = start_instance()
+      GameInstance.pause(pid)
+      assert GameInstance.status(pid) == :paused
+
+      assert :ok = GameInstance.unpause(pid)
+      assert GameInstance.status(pid) == :live
+    end
+
+    test "unpausing starts a new tick timer" do
+      pid = start_instance()
+      GameInstance.pause(pid)
+      assert :sys.get_state(pid).tick_ref == nil
+
+      GameInstance.unpause(pid)
+
+      assert :sys.get_state(pid).tick_ref != nil
+    end
+
+    test "unpausing an already live game is a no-op" do
+      pid = start_instance()
+      assert GameInstance.status(pid) == :live
+
+      assert :ok = GameInstance.unpause(pid)
+      assert GameInstance.status(pid) == :live
+    end
+
+    test "unpausing a game over game returns {:error, :game_over}" do
+      pid = start_instance()
+      :sys.replace_state(pid, fn state -> %{state | status: :over} end)
+
+      assert {:error, :game_over} = GameInstance.unpause(pid)
+      assert :sys.get_state(pid).status == :over
+    end
+
+    test "pause then unpause restores a working tick timer" do
+      pid = start_instance()
+      old_ref = :sys.get_state(pid).tick_ref
+
+      GameInstance.pause(pid)
+      GameInstance.unpause(pid)
+
+      new_ref = :sys.get_state(pid).tick_ref
+      assert new_ref != nil
+      assert new_ref != old_ref
+    end
+  end
 end
