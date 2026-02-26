@@ -50,59 +50,59 @@ defmodule Tetris.Core.FieldTest do
     end
   end
 
-  describe "can_move?/4" do
+  describe "can_place?/4" do
     test "shape fits within empty field" do
       {:ok, field} = Field.new(5, 5)
-      assert Field.can_move?(field, @dot, 2, 2)
+      assert Field.can_place?(field, @dot, 2, 2)
     end
 
     test "shape at top-left corner" do
       {:ok, field} = Field.new(5, 5)
-      assert Field.can_move?(field, @dot, 0, 0)
+      assert Field.can_place?(field, @dot, 0, 0)
     end
 
     test "shape at bottom-right corner" do
       {:ok, field} = Field.new(5, 5)
-      assert Field.can_move?(field, @dot, 4, 4)
+      assert Field.can_place?(field, @dot, 4, 4)
     end
 
     test "returns false when shape extends past right edge" do
       {:ok, field} = Field.new(5, 5)
-      refute Field.can_move?(field, @dot, 5, 2)
+      refute Field.can_place?(field, @dot, 5, 2)
     end
 
     test "returns false when shape extends past left edge" do
       {:ok, field} = Field.new(5, 5)
-      refute Field.can_move?(field, @dot, -1, 2)
+      refute Field.can_place?(field, @dot, -1, 2)
     end
 
     test "returns false when shape extends past bottom edge" do
       {:ok, field} = Field.new(5, 5)
-      refute Field.can_move?(field, @dot, 2, 5)
+      refute Field.can_place?(field, @dot, 2, 5)
     end
 
     test "allows shape with negative y coords (above field)" do
       {:ok, field} = Field.new(5, 5)
-      assert Field.can_move?(field, @bar, 2, 0)
+      assert Field.can_place?(field, @bar, 2, 0)
     end
 
     test "returns false when cell is occupied" do
       {:ok, field} = Field.new(5, 5)
       # Place a dot at (2,2), then try to move there again
       {_, field} = Field.capture(field, @dot, 2, 2)
-      refute Field.can_move?(field, @dot, 2, 2)
+      refute Field.can_place?(field, @dot, 2, 2)
     end
 
     test "works with bar shape within bounds" do
       {:ok, field} = Field.new(5, 5)
-      assert Field.can_move?(field, @bar, 2, 2)
+      assert Field.can_place?(field, @bar, 2, 2)
     end
 
     test "returns false when bar extends past bottom" do
       {:ok, field} = Field.new(5, 5)
       # bar has y coords 1,0,-1; at coord_y=5 the lowest cell is at y=4 (ok)
       # but the top cell would be at y=6 which is past height-1=4
-      refute Field.can_move?(field, @bar, 2, 5)
+      refute Field.can_place?(field, @bar, 2, 5)
     end
   end
 
@@ -157,32 +157,6 @@ defmodule Tetris.Core.FieldTest do
       assert count == 0
       assert Matrix.elem(new_field.cells, 0, 1) == 1
       assert Matrix.elem(new_field.cells, 1, 1) == 1
-    end
-  end
-
-  describe "shift_shape/3" do
-    test "shifts integer coords" do
-      shifted = Field.shift_shape(@dot, 3, 4)
-      assert shifted.coords == [[3, 4]]
-    end
-
-    test "shifts and snaps half-integer coords" do
-      shifted = Field.shift_shape(@stick, 2, 5)
-      # (0, 1.5)+( 2, 5) = (2, 6.5) -> snapped to (2, 7)
-      # (0, 0.5)+(2, 5) = (2, 5.5) -> snapped to (2, 6)
-      # (0,-0.5)+(2, 5) = (2, 4.5) -> snapped to (2, 5)
-      # (0,-1.5)+(2, 5) = (2, 3.5) -> snapped to (2, 4)
-      assert shifted.coords == [[2, 7], [2, 6], [2, 5], [2, 4]]
-    end
-
-    test "preserves label" do
-      shifted = Field.shift_shape(@bar, 1, 1)
-      assert shifted.label == :bar
-    end
-
-    test "shifts by zero does not change integer coords" do
-      shifted = Field.shift_shape(@bar, 0, 0)
-      assert shifted.coords == @bar.coords
     end
   end
 

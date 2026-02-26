@@ -82,22 +82,14 @@ defmodule Tetris.Core.Field do
     {count, %Field{field | cells: new_cells}}
   end
 
-  @spec prepend_empty_rows(Matrix.matrix(), non_neg_integer(), pos_integer()) :: Matrix.matrix()
-  defp prepend_empty_rows(cells, 0, _width), do: cells
-
-  defp prepend_empty_rows(cells, rows, width) do
-    empty_row = List.duplicate(0, width)
-    Enum.reduce(1..rows, cells, fn _, acc -> [empty_row | acc] end)
-  end
-
   @doc """
   Checks if shape can be placed at the given coordinates.
 
   Returns true if no interference from occupied cells detected and
   shape still stays within the field's bounds; returns false otherwise.
   """
-  @spec can_move?(Field.t(), Shape.t(), number(), number()) :: boolean()
-  def can_move?(field, shape, coord_x, coord_y) do
+  @spec can_place?(Field.t(), Shape.t(), number(), number()) :: boolean()
+  def can_place?(field, shape, coord_x, coord_y) do
     max_y = field.height - 1
     min_x = 0
     max_x = field.width - 1
@@ -135,11 +127,25 @@ defmodule Tetris.Core.Field do
   end
 
   @doc """
-  Shifts shape along x and y coordinates by deltas provided and snaps
-  the resulting coordinates to integer values suitable for field placement.
+  Pretty prints cell contents of the field.
   """
+  @spec pretty_print(Field.t()) :: atom()
+  def pretty_print(%Field{cells: cells}) do
+    Matrix.pretty_print(cells)
+  end
+
+  # --- Helper methods ---
+
+  @spec prepend_empty_rows(Matrix.matrix(), non_neg_integer(), pos_integer()) :: Matrix.matrix()
+  defp prepend_empty_rows(cells, 0, _width), do: cells
+
+  defp prepend_empty_rows(cells, rows, width) do
+    empty_row = List.duplicate(0, width)
+    Enum.reduce(1..rows, cells, fn _, acc -> [empty_row | acc] end)
+  end
+
   @spec shift_shape(Shape.t(), number(), number()) :: Shape.t()
-  def shift_shape(%Shape{coords: coords} = shape, delta_x, delta_y) do
+  defp shift_shape(%Shape{coords: coords} = shape, delta_x, delta_y) do
     shift_matrix = Enum.map(coords, fn _ -> [delta_x, delta_y] end)
 
     new_coords =
@@ -153,12 +159,4 @@ defmodule Tetris.Core.Field do
   @spec snap(Matrix.matrix()) :: Matrix.matrix()
   defp snap(coords),
     do: MatrixUtils.apply_each_cell(coords, fn cell -> round(cell + 0.1) end)
-
-  @doc """
-  Pretty prints cell contents of the field.
-  """
-  @spec pretty_print(Field.t()) :: atom()
-  def pretty_print(%Field{cells: cells}) do
-    Matrix.pretty_print(cells)
-  end
 end
