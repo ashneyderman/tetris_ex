@@ -18,7 +18,8 @@ defmodule Tetris.GameInstance do
             tick_time: 1000,
             tick_ref: nil,
             score: 0,
-            rows_cleared: 0
+            rows_cleared: 0,
+            renderer: nil
 
   def start_link(opts) do
     game_id = Keyword.get(opts, :game_id, 0)
@@ -56,6 +57,7 @@ defmodule Tetris.GameInstance do
     width = Keyword.get(opts, :width, 10)
     height = Keyword.get(opts, :height, 20)
     tick_time = Keyword.get(opts, :tick_time, 1000)
+    renderer = Keyword.get(opts, :renderer, nil)
 
     {:ok, field} = Field.new(width, height)
     shape = ShapeRepository.select_random_shape()
@@ -66,7 +68,8 @@ defmodule Tetris.GameInstance do
       current_shape: shape,
       current_shape_coords: {x, y},
       status: :paused,
-      tick_time: tick_time
+      tick_time: tick_time,
+      renderer: renderer
     }
 
     {:ok, state, {:continue, :start_tick}}
@@ -75,7 +78,9 @@ defmodule Tetris.GameInstance do
   @impl true
   def handle_continue(:start_tick, %__MODULE__{tick_time: tick_time} = state) do
     tick_ref = Process.send_after(self(), :tick, tick_time)
-    {:noreply, %{state | tick_ref: tick_ref, status: :live}}
+    new_state = %{state | tick_ref: tick_ref, status: :live}
+    maybe_render(new_state)
+    {:noreply, new_state}
   end
 
   @impl true
@@ -84,7 +89,9 @@ defmodule Tetris.GameInstance do
     rotated = Shape.rotate(shape, direction)
 
     if Field.can_place?(field, rotated, x, y) do
-      {:reply, {:ok, state}, %{state | current_shape: rotated}}
+      new_state = %{state | current_shape: rotated}
+      maybe_render(new_state)
+      {:reply, {:ok, state}, new_state}
     else
       {:reply, {:error, :unable_to_rotate}, state}
     end
@@ -97,6 +104,7 @@ defmodule Tetris.GameInstance do
 
     if Field.can_place?(field, shape, new_x, y) do
       new_state = %{state | current_shape_coords: {new_x, y}}
+      maybe_render(new_state)
       {:reply, {:ok, new_state}, new_state}
     else
       {:reply, {:error, :unable_to_shift}, state}
@@ -128,22 +136,27 @@ defmodule Tetris.GameInstance do
 
     # 3. Check for game over
     if game_over?(shape, x, final_y) do
-      {:reply, :ok, %{state | status: :over, tick_ref: nil}}
+      new_state = %{state | status: :over, tick_ref: nil}
+      maybe_render(new_state)
+      {:reply, :ok, new_state}
     else
       {cleared, new_field} = Field.capture(field, shape, x, final_y)
       new_shape = ShapeRepository.select_random_shape()
       {new_x, new_y} = Field.starting_position(new_field, new_shape)
       new_tick_ref = Process.send_after(self(), :tick, tick_time)
 
-      {:reply, :ok,
-       %{state |
-         field: new_field,
-         current_shape: new_shape,
-         current_shape_coords: {new_x, new_y},
-         tick_ref: new_tick_ref,
-         score: state.score + cleared * cleared,
-         rows_cleared: state.rows_cleared + cleared
-       }}
+      new_state =
+        %{state |
+          field: new_field,
+          current_shape: new_shape,
+          current_shape_coords: {new_x, new_y},
+          tick_ref: new_tick_ref,
+          score: state.score + cleared * cleared,
+          rows_cleared: state.rows_cleared + cleared
+        }
+
+      maybe_render(new_state)
+      {:reply, :ok, new_state}
     end
   end
 
@@ -153,7 +166,9 @@ defmodule Tetris.GameInstance do
 
   def handle_call(:pause, _from, %__MODULE__{status: :live, tick_ref: tick_ref} = state) do
     if tick_ref, do: Process.cancel_timer(tick_ref)
-    {:reply, :ok, %{state | status: :paused, tick_ref: nil}}
+    new_state = %{state | status: :paused, tick_ref: nil}
+    maybe_render(new_state)
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:pause, _from, %__MODULE__{status: :paused} = state) do
@@ -166,7 +181,9 @@ defmodule Tetris.GameInstance do
 
   def handle_call(:unpause, _from, %__MODULE__{status: :paused, tick_time: tick_time} = state) do
     tick_ref = Process.send_after(self(), :tick, tick_time)
-    {:reply, :ok, %{state | status: :live, tick_ref: tick_ref}}
+    new_state = %{state | status: :live, tick_ref: tick_ref}
+    maybe_render(new_state)
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:unpause, _from, %__MODULE__{status: :live} = state) do
@@ -190,25 +207,32 @@ defmodule Tetris.GameInstance do
 
     if Field.can_place?(field, shape, x, new_y) do
       tick_ref = Process.send_after(self(), :tick, tick_time)
-      {:noreply, %{state | current_shape_coords: {x, new_y}, tick_ref: tick_ref}}
+      new_state = %{state | current_shape_coords: {x, new_y}, tick_ref: tick_ref}
+      maybe_render(new_state)
+      {:noreply, new_state}
     else
       if game_over?(shape, x, y) do
-        {:noreply, %{state | status: :over, tick_ref: nil}}
+        new_state = %{state | status: :over, tick_ref: nil}
+        maybe_render(new_state)
+        {:noreply, new_state}
       else
         {cleared, new_field} = Field.capture(field, shape, x, y)
         new_shape = ShapeRepository.select_random_shape()
         {new_x, new_y} = Field.starting_position(new_field, new_shape)
         tick_ref = Process.send_after(self(), :tick, tick_time)
 
-        {:noreply,
-         %{state |
-           field: new_field,
-           current_shape: new_shape,
-           current_shape_coords: {new_x, new_y},
-           tick_ref: tick_ref,
-           score: state.score + cleared * cleared,
-           rows_cleared: state.rows_cleared + cleared
-         }}
+        new_state =
+          %{state |
+            field: new_field,
+            current_shape: new_shape,
+            current_shape_coords: {new_x, new_y},
+            tick_ref: tick_ref,
+            score: state.score + cleared * cleared,
+            rows_cleared: state.rows_cleared + cleared
+          }
+
+        maybe_render(new_state)
+        {:noreply, new_state}
       end
     end
   end
@@ -225,5 +249,16 @@ defmodule Tetris.GameInstance do
 
   defp game_over?(%Shape{coords: coords}, _offset_x, offset_y) do
     Enum.any?(coords, fn [_x, y] -> round(y + offset_y + 0.1) <= 0 end)
+  end
+
+  defp maybe_render(%__MODULE__{renderer: renderer} = state) do
+    Tetris.Renderer.maybe_render(renderer, %{
+      field: state.field,
+      current_shape: state.current_shape,
+      current_shape_coords: state.current_shape_coords,
+      score: state.score,
+      rows_cleared: state.rows_cleared,
+      status: state.status
+    })
   end
 end

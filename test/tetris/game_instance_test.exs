@@ -579,6 +579,126 @@ defmodule Tetris.GameInstanceTest do
     end
   end
 
+  describe "renderer integration" do
+    defmodule TestRenderer do
+      @behaviour Tetris.Renderer
+
+      @impl true
+      def render(data) do
+        send(Process.whereis(:renderer_test), {:rendered, data})
+        :ok
+      end
+    end
+
+    defp start_rendered_instance(opts \\ []) do
+      Process.register(self(), :renderer_test)
+      game_id = System.unique_integer([:positive])
+      opts = Keyword.merge([game_id: game_id, tick_time: 60_000, renderer: TestRenderer], opts)
+      start_supervised!({GameInstance, opts})
+    end
+
+    test "render is called after init (handle_continue)" do
+      _pid = start_rendered_instance()
+      assert_receive {:rendered, data}, 500
+      assert data.status == :live
+    end
+
+    test "render data contains all expected keys" do
+      _pid = start_rendered_instance()
+      assert_receive {:rendered, data}, 500
+
+      assert Map.has_key?(data, :field)
+      assert Map.has_key?(data, :current_shape)
+      assert Map.has_key?(data, :current_shape_coords)
+      assert Map.has_key?(data, :score)
+      assert Map.has_key?(data, :rows_cleared)
+      assert Map.has_key?(data, :status)
+    end
+
+    test "render is called after successful shift" do
+      pid = start_rendered_instance(width: 10, height: 20)
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.shift(pid, :right)
+      assert_receive {:rendered, _}, 500
+    end
+
+    test "render is NOT called on failed shift" do
+      pid = start_rendered_instance(width: 10, height: 20)
+      assert_receive {:rendered, _}, 500
+
+      # Shift right until blocked
+      Enum.each(1..20, fn _ -> GameInstance.shift(pid, :right) end)
+      # Drain all render messages
+      drain_renders()
+
+      # Now try one more shift that should fail
+      assert {:error, :unable_to_shift} = GameInstance.shift(pid, :right)
+      refute_receive {:rendered, _}, 100
+    end
+
+    test "render is called after successful rotate" do
+      pid = start_rendered_instance(width: 10, height: 20)
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.rotate(pid, :cw)
+      assert_receive {:rendered, _}, 500
+    end
+
+    test "render is called after drop_shape" do
+      pid = start_rendered_instance(width: 10, height: 20)
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.drop_shape(pid)
+      assert_receive {:rendered, _}, 500
+    end
+
+    test "render is called after pause" do
+      pid = start_rendered_instance()
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.pause(pid)
+      assert_receive {:rendered, data}, 500
+      assert data.status == :paused
+    end
+
+    test "render is called after unpause" do
+      pid = start_rendered_instance()
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.pause(pid)
+      assert_receive {:rendered, _}, 500
+
+      GameInstance.unpause(pid)
+      assert_receive {:rendered, data}, 500
+      assert data.status == :live
+    end
+
+    test "render is called on tick" do
+      pid = start_rendered_instance(width: 10, height: 20)
+      assert_receive {:rendered, _}, 500
+
+      send(pid, :tick)
+      _ = :sys.get_state(pid)
+      assert_receive {:rendered, _}, 500
+    end
+
+    test "backward compatibility: no renderer option causes no errors" do
+      game_id = System.unique_integer([:positive])
+      pid = start_supervised!({GameInstance, game_id: game_id, tick_time: 60_000})
+      assert Process.alive?(pid)
+      assert GameInstance.status(pid) == :live
+    end
+
+    defp drain_renders do
+      receive do
+        {:rendered, _} -> drain_renders()
+      after
+        0 -> :ok
+      end
+    end
+  end
+
   # Fills all rows of the field with 1s except the top row (row 0).
   defp fill_field_except_top_row(%Field{width: width, height: height} = field) do
     cells =
