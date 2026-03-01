@@ -13,26 +13,18 @@ defmodule Tetris.GameRobotTest do
     start_supervised!({GameInstance, opts})
   end
 
-  defp start_robot(game_pid, opts \\ []) do
-    opts = Keyword.merge([game_pid: game_pid], opts)
-    start_supervised!({GameRobot, opts})
-  end
-
   describe "startup" do
-    test "robot starts and connects to game via set_robot/2" do
-      game = start_game()
-      robot = start_robot(game)
-
-      assert Process.alive?(robot)
-      assert :ok = GameInstance.set_robot(game, robot)
-    end
-
-    test "set_robot triggers new_piece notification to robot" do
+    test "robotic_play option starts the robot automatically" do
       shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
-      game = start_game(shape_provider: fn -> shape end)
-      robot = start_robot(game, moves_per_tick: 20)
 
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
+
+      state = :sys.get_state(game)
+      assert is_pid(state.robot)
+      assert Process.alive?(state.robot)
 
       assert :ok = wait_for_placement(game)
     end
@@ -41,10 +33,14 @@ defmodule Tetris.GameRobotTest do
   describe "move execution" do
     test "robot drops piece to a valid position" do
       shape = %Shape{label: :stick, coords: [[0, 1.5], [0, 0.5], [0, -0.5], [0, -1.5]]}
-      game = start_game(shape_provider: fn -> shape end, width: 10, height: 20)
-      robot = start_robot(game, moves_per_tick: 20)
 
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        width: 10,
+        height: 20,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
+
       assert :ok = wait_for_placement(game)
 
       state = :sys.get_state(game)
@@ -62,10 +58,12 @@ defmodule Tetris.GameRobotTest do
         Enum.at(shapes, rem(idx - 1, length(shapes)))
       end
 
-      game = start_game(shape_provider: provider, width: 10, height: 20)
-      robot = start_robot(game, moves_per_tick: 20)
-
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: provider,
+        width: 10,
+        height: 20,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
 
       # Let robot play several pieces
       Process.sleep(200)
@@ -85,10 +83,13 @@ defmodule Tetris.GameRobotTest do
     test "robot executes at most moves_per_tick moves per window" do
       # Use a shape that needs several moves (shifts) to reach target
       shape = %Shape{label: :stick, coords: [[0, 1.5], [0, 0.5], [0, -0.5], [0, -1.5]]}
-      game = start_game(shape_provider: fn -> shape end, width: 10, height: 20)
-      robot = start_robot(game, moves_per_tick: 1)
 
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        width: 10,
+        height: 20,
+        robotic_play: {GameRobot, [moves_per_tick: 1]}
+      )
 
       # With moves_per_tick=1, robot should still complete eventually
       # but takes more time due to scheduling delays
@@ -102,10 +103,14 @@ defmodule Tetris.GameRobotTest do
   describe "placement quality" do
     test "robot avoids creating holes" do
       shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
-      game = start_game(shape_provider: fn -> shape end, width: 10, height: 20)
-      robot = start_robot(game, moves_per_tick: 20)
 
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        width: 10,
+        height: 20,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
+
       Process.sleep(200)
 
       state = :sys.get_state(game)
@@ -128,10 +133,12 @@ defmodule Tetris.GameRobotTest do
       end
 
       # Use a taller board to give the robot more room
-      game = start_game(shape_provider: provider, width: 10, height: 40)
-      robot = start_robot(game, moves_per_tick: 20)
-
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: provider,
+        width: 10,
+        height: 40,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
 
       # Wait long enough for 10+ pieces
       Process.sleep(500)
@@ -148,15 +155,18 @@ defmodule Tetris.GameRobotTest do
     test "game over is handled gracefully" do
       shape = %Shape{label: :stick, coords: [[0, 1.5], [0, 0.5], [0, -0.5], [0, -1.5]]}
 
-      game = start_game(shape_provider: fn -> shape end, width: 4, height: 6)
-      robot = start_robot(game, moves_per_tick: 20)
-
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        width: 4,
+        height: 6,
+        robotic_play: {GameRobot, [moves_per_tick: 20]}
+      )
 
       # Small board should eventually cause game over
       Process.sleep(500)
 
       state = :sys.get_state(game)
+      robot = state.robot
       # Robot process should still be alive even if game is over
       assert Process.alive?(robot)
       assert state.status in [:live, :over]
@@ -176,15 +186,19 @@ defmodule Tetris.GameRobotTest do
         Enum.at(shapes, rem(idx - 1, length(shapes)))
       end
 
-      game = start_game(shape_provider: provider, width: 10, height: 20)
-      # Very slow rate to test cancellation
-      robot = start_robot(game, moves_per_tick: 1)
+      game = start_game(
+        shape_provider: provider,
+        width: 10,
+        height: 20,
+        # Very slow rate to test cancellation
+        robotic_play: {GameRobot, [moves_per_tick: 1]}
+      )
 
-      GameInstance.set_robot(game, robot)
       Process.sleep(300)
 
+      state = :sys.get_state(game)
       # Robot should still be alive and functioning
-      assert Process.alive?(robot)
+      assert Process.alive?(state.robot)
     end
 
     test "works with all 7 shapes" do
@@ -192,18 +206,23 @@ defmodule Tetris.GameRobotTest do
 
       for shape <- shapes do
         game_id = System.unique_integer([:positive])
-        # Use a tall board so the robot doesn't fill it up
-        {:ok, game} = GameInstance.start_link(game_id: game_id, tick_time: :infinity, width: 10, height: 40, shape_provider: fn -> shape end)
-        {:ok, robot} = GameRobot.start_link(game_pid: game, moves_per_tick: 20)
 
-        GameInstance.set_robot(game, robot)
+        {:ok, game} = GameInstance.start_link(
+          game_id: game_id,
+          tick_time: :infinity,
+          width: 10,
+          height: 40,
+          shape_provider: fn -> shape end,
+          robotic_play: {GameRobot, [moves_per_tick: 20]}
+        )
 
         assert :ok = wait_for_placement(game),
                "Robot failed to place shape #{shape.label}"
 
-        assert Process.alive?(robot), "Robot crashed with shape #{shape.label}"
+        state = :sys.get_state(game)
+        assert Process.alive?(state.robot), "Robot crashed with shape #{shape.label}"
 
-        GenServer.stop(robot)
+        GenServer.stop(state.robot)
         GenServer.stop(game)
       end
     end
@@ -212,10 +231,14 @@ defmodule Tetris.GameRobotTest do
   describe "duration_sec" do
     test "robot with nil duration_sec plays indefinitely" do
       shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
-      game = start_game(shape_provider: fn -> shape end, width: 10, height: 20)
-      robot = start_robot(game, moves_per_tick: 20, duration_sec: nil)
 
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: fn -> shape end,
+        width: 10,
+        height: 20,
+        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: nil]}
+      )
+
       assert :ok = wait_for_placement(game)
     end
 
@@ -231,17 +254,20 @@ defmodule Tetris.GameRobotTest do
       end
 
       # Use a real tick_time so pieces fall after robot stops
-      game = start_game(shape_provider: provider, width: 10, height: 20, tick_time: 50)
-      # duration_sec: 0 means expire immediately
-      robot = start_robot(game, moves_per_tick: 20, duration_sec: 0)
-
-      # Small delay so the robot's started_at is definitely in the past
-      Process.sleep(10)
-
-      GameInstance.set_robot(game, robot)
+      game = start_game(
+        shape_provider: provider,
+        width: 10,
+        height: 20,
+        tick_time: 50,
+        # duration_sec: 0 means expire immediately
+        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: 0]}
+      )
 
       # Give time for the notification to be processed
       Process.sleep(50)
+
+      state = :sys.get_state(game)
+      robot = state.robot
 
       # Robot should have ignored the notification — move_queue should be empty
       robot_state = :sys.get_state(robot)
@@ -262,11 +288,14 @@ defmodule Tetris.GameRobotTest do
         shape
       end
 
-      game = start_game(shape_provider: provider, width: 10, height: 40)
-      # 1 second duration
-      robot = start_robot(game, moves_per_tick: 20, duration_sec: 1)
+      game = start_game(
+        shape_provider: provider,
+        width: 10,
+        height: 40,
+        # 1 second duration
+        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: 1]}
+      )
 
-      GameInstance.set_robot(game, robot)
       assert :ok = wait_for_placement(game)
 
       # Robot should have placed pieces during the active period
@@ -281,6 +310,8 @@ defmodule Tetris.GameRobotTest do
 
       # Send a new piece notification manually to test that robot ignores it
       game_state = :sys.get_state(game)
+      robot = game_state.robot
+
       GenServer.cast(robot, {:new_piece, %{
         field: game_state.field,
         shape: game_state.current_shape,

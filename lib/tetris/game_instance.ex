@@ -33,6 +33,7 @@ defmodule Tetris.GameInstance do
             transcriber: nil,
             start_time: nil,
             shape_provider: nil,
+            robotic_play: nil,
             robot: nil
 
   def start_link(opts) do
@@ -64,10 +65,6 @@ defmodule Tetris.GameInstance do
     GenServer.call(pid_or_name, :status)
   end
 
-  def set_robot(pid_or_name, robot_pid) do
-    GenServer.call(pid_or_name, {:set_robot, robot_pid})
-  end
-
   # --- Callbacks ---
 
   @impl true
@@ -77,6 +74,7 @@ defmodule Tetris.GameInstance do
     tick_time = Keyword.get(opts, :tick_time, 1000)
     renderer = Keyword.get(opts, :renderer, nil)
     shape_provider = Keyword.get(opts, :shape_provider, &ShapeRepository.select_random_shape/0)
+    robotic_play = Keyword.get(opts, :robotic_play, nil)
 
     transcriber =
       case Keyword.get(opts, :transcriber, nil) do
@@ -103,7 +101,8 @@ defmodule Tetris.GameInstance do
       renderer: renderer,
       transcriber: transcriber,
       start_time: start_time,
-      shape_provider: shape_provider
+      shape_provider: shape_provider,
+      robotic_play: robotic_play
     }
 
     state =
@@ -122,6 +121,18 @@ defmodule Tetris.GameInstance do
     tick_ref = maybe_schedule_tick(tick_time)
     new_state = %{state | tick_ref: tick_ref, status: :live}
     maybe_render(new_state)
+
+    robot =
+      case new_state.robotic_play do
+        {robot_mod, robot_opts} ->
+          {:ok, pid} = robot_mod.start_link([game_pid: self()] ++ robot_opts)
+          pid
+
+        nil ->
+          nil
+      end
+
+    new_state = %{new_state | robot: robot}
     maybe_notify_robot(new_state)
     {:noreply, new_state}
   end
@@ -247,12 +258,6 @@ defmodule Tetris.GameInstance do
 
   def handle_call(:status, _from, %__MODULE__{status: status} = state) do
     {:reply, status, state}
-  end
-
-  def handle_call({:set_robot, robot_pid}, _from, state) do
-    new_state = %{state | robot: robot_pid}
-    maybe_notify_robot(new_state)
-    {:reply, :ok, new_state}
   end
 
   @impl true
