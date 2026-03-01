@@ -6,6 +6,8 @@ What are the possible moves:
 
 {:rotate, :cw}, {:rotate, :ccw}, {:shift, :left}, {:shift, :right}, :drop_shape, :capture_shape
 
+2. We need transcript capabilities: similar to how chess games are recorded.
+
 # Here is a sample game transcript:
 
 {:game, <time_offset>, :new, :s, {5, -1}}
@@ -17,5 +19,3 @@ What are the possible moves:
 {:user, <time_offset>, :shift, :left}
 {:user, <time_offset>, :shift, :left}
 {:game, <time_offset>, :capture_shape}
-
-2. We need transcript capabilities: similar to how chess games are recorded.

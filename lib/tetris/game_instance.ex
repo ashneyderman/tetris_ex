@@ -10,6 +10,7 @@ defmodule Tetris.GameInstance do
   alias Tetris.Core.Field
   alias Tetris.Core.Shape
   alias Tetris.Core.ShapeRepository
+  alias Tetris.Transcriber
 
   defstruct field: nil,
             current_shape: nil,
@@ -19,7 +20,10 @@ defmodule Tetris.GameInstance do
             tick_ref: nil,
             score: 0,
             rows_cleared: 0,
-            renderer: nil
+            renderer: nil,
+            transcriber: nil,
+            start_time: nil,
+            shape_provider: nil
 
   def start_link(opts) do
     game_id = Keyword.get(opts, :game_id, 0)
@@ -58,9 +62,22 @@ defmodule Tetris.GameInstance do
     height = Keyword.get(opts, :height, 20)
     tick_time = Keyword.get(opts, :tick_time, 1000)
     renderer = Keyword.get(opts, :renderer, nil)
+    shape_provider = Keyword.get(opts, :shape_provider, &ShapeRepository.select_random_shape/0)
+
+    transcriber =
+      case Keyword.get(opts, :transcriber, nil) do
+        {mod, transcriber_opts} ->
+          {:ok, state} = mod.init(transcriber_opts)
+          {mod, state}
+
+        nil ->
+          nil
+      end
+
+    start_time = System.monotonic_time(:millisecond)
 
     {:ok, field} = Field.new(width, height)
-    shape = ShapeRepository.select_random_shape()
+    shape = shape_provider.()
     {x, y} = Field.starting_position(field, shape)
 
     state = %__MODULE__{
@@ -69,15 +86,21 @@ defmodule Tetris.GameInstance do
       current_shape_coords: {x, y},
       status: :paused,
       tick_time: tick_time,
-      renderer: renderer
+      renderer: renderer,
+      transcriber: transcriber,
+      start_time: start_time,
+      shape_provider: shape_provider
     }
+
+    state = maybe_transcribe(state, {:game, :offset, :init, %{width: width, height: height, tick_time: tick_time}})
+    state = maybe_transcribe(state, {:game, :offset, :new, shape.label, {x, y}})
 
     {:ok, state, {:continue, :start_tick}}
   end
 
   @impl true
   def handle_continue(:start_tick, %__MODULE__{tick_time: tick_time} = state) do
-    tick_ref = Process.send_after(self(), :tick, tick_time)
+    tick_ref = maybe_schedule_tick(tick_time)
     new_state = %{state | tick_ref: tick_ref, status: :live}
     maybe_render(new_state)
     {:noreply, new_state}
@@ -90,6 +113,7 @@ defmodule Tetris.GameInstance do
 
     if Field.can_place?(field, rotated, x, y) do
       new_state = %{state | current_shape: rotated}
+      new_state = maybe_transcribe(new_state, {:user, :offset, :rotate, direction})
       maybe_render(new_state)
       {:reply, {:ok, state}, new_state}
     else
@@ -104,6 +128,7 @@ defmodule Tetris.GameInstance do
 
     if Field.can_place?(field, shape, new_x, y) do
       new_state = %{state | current_shape_coords: {new_x, y}}
+      new_state = maybe_transcribe(new_state, {:user, :offset, :shift, direction})
       maybe_render(new_state)
       {:reply, {:ok, new_state}, new_state}
     else
@@ -125,7 +150,8 @@ defmodule Tetris.GameInstance do
       current_shape: shape,
       current_shape_coords: {x, y},
       tick_time: tick_time,
-      tick_ref: tick_ref
+      tick_ref: tick_ref,
+      shape_provider: shape_provider
     } = state
 
     # 1. Stop the current tick timer
@@ -134,16 +160,23 @@ defmodule Tetris.GameInstance do
     # 2. Find the lowest valid y by progressively increasing y
     final_y = drop_to_bottom(field, shape, x, y)
 
+    state = maybe_transcribe(state, {:user, :offset, :drop_shape})
+
     # 3. Check for game over
     if game_over?(shape, x, final_y) do
+      state = maybe_transcribe(state, {:game, :offset, :game_over})
       new_state = %{state | status: :over, tick_ref: nil}
       maybe_render(new_state)
       {:reply, :ok, new_state}
     else
       {cleared, new_field} = Field.capture(field, shape, x, final_y)
-      new_shape = ShapeRepository.select_random_shape()
+      state = maybe_transcribe(state, {:game, :offset, :capture_shape})
+
+      new_shape = shape_provider.()
       {new_x, new_y} = Field.starting_position(new_field, new_shape)
-      new_tick_ref = Process.send_after(self(), :tick, tick_time)
+      state = maybe_transcribe(state, {:game, :offset, :new, new_shape.label, {new_x, new_y}})
+
+      new_tick_ref = maybe_schedule_tick(tick_time)
 
       new_state =
         %{state |
@@ -180,7 +213,7 @@ defmodule Tetris.GameInstance do
   end
 
   def handle_call(:unpause, _from, %__MODULE__{status: :paused, tick_time: tick_time} = state) do
-    tick_ref = Process.send_after(self(), :tick, tick_time)
+    tick_ref = maybe_schedule_tick(tick_time)
     new_state = %{state | status: :live, tick_ref: tick_ref}
     maybe_render(new_state)
     {:reply, :ok, new_state}
@@ -200,26 +233,34 @@ defmodule Tetris.GameInstance do
       field: field,
       current_shape: shape,
       current_shape_coords: {x, y},
-      tick_time: tick_time
+      tick_time: tick_time,
+      shape_provider: shape_provider
     } = state
 
     new_y = y + 1
 
+    state = maybe_transcribe(state, {:game, :offset, :tick})
+
     if Field.can_place?(field, shape, x, new_y) do
-      tick_ref = Process.send_after(self(), :tick, tick_time)
+      tick_ref = maybe_schedule_tick(tick_time)
       new_state = %{state | current_shape_coords: {x, new_y}, tick_ref: tick_ref}
       maybe_render(new_state)
       {:noreply, new_state}
     else
       if game_over?(shape, x, y) do
+        state = maybe_transcribe(state, {:game, :offset, :game_over})
         new_state = %{state | status: :over, tick_ref: nil}
         maybe_render(new_state)
         {:noreply, new_state}
       else
         {cleared, new_field} = Field.capture(field, shape, x, y)
-        new_shape = ShapeRepository.select_random_shape()
+        state = maybe_transcribe(state, {:game, :offset, :capture_shape})
+
+        new_shape = shape_provider.()
         {new_x, new_y} = Field.starting_position(new_field, new_shape)
-        tick_ref = Process.send_after(self(), :tick, tick_time)
+        state = maybe_transcribe(state, {:game, :offset, :new, new_shape.label, {new_x, new_y}})
+
+        tick_ref = maybe_schedule_tick(tick_time)
 
         new_state =
           %{state |
@@ -235,6 +276,11 @@ defmodule Tetris.GameInstance do
         {:noreply, new_state}
       end
     end
+  end
+
+  @impl true
+  def terminate(_reason, %__MODULE__{transcriber: transcriber}) do
+    Transcriber.maybe_finalize(transcriber)
   end
 
   defp drop_to_bottom(field, shape, x, y) do
@@ -261,4 +307,19 @@ defmodule Tetris.GameInstance do
       status: state.status
     })
   end
+
+  defp maybe_transcribe(%__MODULE__{transcriber: nil} = state, _event), do: state
+
+  defp maybe_transcribe(%__MODULE__{transcriber: transcriber, start_time: start_time} = state, event) do
+    event = put_time_offset(event, start_time)
+    %{state | transcriber: Transcriber.maybe_record(transcriber, event)}
+  end
+
+  defp put_time_offset(event, start_time) do
+    offset = System.monotonic_time(:millisecond) - start_time
+    put_elem(event, 1, offset)
+  end
+
+  defp maybe_schedule_tick(:infinity), do: nil
+  defp maybe_schedule_tick(ms), do: Process.send_after(self(), :tick, ms)
 end

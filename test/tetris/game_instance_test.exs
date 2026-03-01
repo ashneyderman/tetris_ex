@@ -699,6 +699,181 @@ defmodule Tetris.GameInstanceTest do
     end
   end
 
+  describe "shape_provider" do
+    test "uses custom shape_provider instead of random" do
+      shape = %Shape{label: :stick, coords: [[0, 1.5], [0, 0.5], [0, -0.5], [0, -1.5]]}
+      provider = fn -> shape end
+
+      pid = start_instance(width: 10, height: 20, shape_provider: provider)
+      state = :sys.get_state(pid)
+
+      assert state.current_shape.label == :stick
+    end
+
+    test "shape_provider is called for new shapes after drop" do
+      shapes = [
+        %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]},
+        %Shape{label: :stick, coords: [[0, 1.5], [0, 0.5], [0, -0.5], [0, -1.5]]}
+      ]
+
+      counter = :atomics.new(1, signed: false)
+      :atomics.put(counter, 1, 0)
+
+      provider = fn ->
+        idx = :atomics.add_get(counter, 1, 1)
+        Enum.at(shapes, idx - 1, hd(shapes))
+      end
+
+      pid = start_instance(width: 10, height: 20, shape_provider: provider)
+      state = :sys.get_state(pid)
+      assert state.current_shape.label == :square
+
+      GameInstance.drop_shape(pid)
+      new_state = :sys.get_state(pid)
+      assert new_state.current_shape.label == :stick
+    end
+  end
+
+  describe "transcriber integration" do
+    defmodule TestTranscriber do
+      @behaviour Tetris.Transcriber
+
+      @impl true
+      def init(opts) do
+        pid = Keyword.fetch!(opts, :test_pid)
+        {:ok, %{events: [], test_pid: pid}}
+      end
+
+      @impl true
+      def record(event, state) do
+        {:ok, %{state | events: state.events ++ [event]}}
+      end
+
+      @impl true
+      def finalize(state) do
+        send(state.test_pid, {:transcriber_events, state.events})
+        :ok
+      end
+    end
+
+    defp start_transcribed_instance(opts \\ []) do
+      game_id = System.unique_integer([:positive])
+      shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
+      provider = fn -> shape end
+
+      opts =
+        Keyword.merge(
+          [
+            game_id: game_id,
+            tick_time: 60_000,
+            shape_provider: provider,
+            transcriber: {TestTranscriber, [test_pid: self()]}
+          ],
+          opts
+        )
+
+      start_supervised!({GameInstance, opts})
+    end
+
+    test "init records :init and :new events" do
+      pid = start_transcribed_instance()
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+
+      assert length(transcriber_state.events) == 2
+      assert {:game, _, :init, %{width: 10, height: 20, tick_time: 60_000}} = Enum.at(transcriber_state.events, 0)
+      assert {:game, _, :new, :square, _coords} = Enum.at(transcriber_state.events, 1)
+    end
+
+    test "shift records :shift event" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      GameInstance.shift(pid, :left)
+
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+      shift_events = Enum.filter(transcriber_state.events, fn e -> elem(e, 2) == :shift end)
+      assert length(shift_events) == 1
+      assert {:user, _, :shift, :left} = hd(shift_events)
+    end
+
+    test "rotate records :rotate event" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      GameInstance.rotate(pid, :cw)
+
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+      rotate_events = Enum.filter(transcriber_state.events, fn e -> elem(e, 2) == :rotate end)
+      assert length(rotate_events) == 1
+      assert {:user, _, :rotate, :cw} = hd(rotate_events)
+    end
+
+    test "drop_shape records :drop_shape, :capture_shape, and :new events" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      GameInstance.drop_shape(pid)
+
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+      event_types = Enum.map(transcriber_state.events, fn e -> elem(e, 2) end)
+
+      assert :drop_shape in event_types
+      assert :capture_shape in event_types
+      # Should have 2 :new events (init + after capture)
+      assert Enum.count(event_types, &(&1 == :new)) == 2
+    end
+
+    test "tick records :tick event" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      send(pid, :tick)
+      _ = :sys.get_state(pid)
+
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+      tick_events = Enum.filter(transcriber_state.events, fn e -> elem(e, 2) == :tick end)
+      assert length(tick_events) == 1
+    end
+
+    test "finalize is called on terminate" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      GameInstance.drop_shape(pid)
+
+      GenServer.stop(pid)
+      assert_receive {:transcriber_events, events}, 500
+      assert length(events) > 0
+    end
+
+    test "time offsets are non-negative integers" do
+      pid = start_transcribed_instance(width: 10, height: 20)
+      GameInstance.shift(pid, :left)
+      GameInstance.rotate(pid, :cw)
+
+      {_mod, transcriber_state} = :sys.get_state(pid).transcriber
+
+      Enum.each(transcriber_state.events, fn event ->
+        offset = elem(event, 1)
+        assert is_integer(offset)
+        assert offset >= 0
+      end)
+    end
+
+    test "backward compatibility: no transcriber option causes no errors" do
+      game_id = System.unique_integer([:positive])
+      pid = start_supervised!({GameInstance, game_id: game_id, tick_time: 60_000})
+      assert Process.alive?(pid)
+      assert GameInstance.status(pid) == :live
+
+      state = :sys.get_state(pid)
+      assert state.transcriber == nil
+    end
+  end
+
+  describe "maybe_schedule_tick/1" do
+    test "tick_time :infinity does not schedule tick" do
+      shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
+      provider = fn -> shape end
+
+      pid = start_instance(width: 10, height: 20, tick_time: :infinity, shape_provider: provider)
+      state = :sys.get_state(pid)
+
+      assert state.tick_ref == nil
+      assert state.status == :live
+    end
+  end
+
   # Fills all rows of the field with 1s except the top row (row 0).
   defp fill_field_except_top_row(%Field{width: width, height: height} = field) do
     cells =
