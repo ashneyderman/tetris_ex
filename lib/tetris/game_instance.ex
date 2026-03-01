@@ -10,7 +10,7 @@ defmodule Tetris.GameInstance do
            width: 15,
            height: 35,
            tick_time: 100,
-           renderer: Tetris.Renderer.PrettyPrint,
+           renderer: Tetris.Renderer.Console,
            transcriber: {Tetris.Transcriber.File, path: "/tmp/my_game_transcript1.txt"}
          )
   """

@@ -1,4 +1,4 @@
-defmodule Tetris.Renderer.PrettyPrint do
+defmodule Tetris.Renderer.Console do
   @moduledoc """
   Terminal renderer using IO.ANSI for colorized, in-place output.
 
