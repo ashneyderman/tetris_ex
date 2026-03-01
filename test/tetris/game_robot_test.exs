@@ -209,6 +209,96 @@ defmodule Tetris.GameRobotTest do
     end
   end
 
+  describe "duration_sec" do
+    test "robot with nil duration_sec plays indefinitely" do
+      shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
+      game = start_game(shape_provider: fn -> shape end, width: 10, height: 20)
+      robot = start_robot(game, moves_per_tick: 20, duration_sec: nil)
+
+      GameInstance.set_robot(game, robot)
+      assert :ok = wait_for_placement(game)
+    end
+
+    test "robot stops making moves after duration_sec expires" do
+      piece_count = :atomics.new(1, signed: false)
+      :atomics.put(piece_count, 1, 0)
+
+      shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
+
+      provider = fn ->
+        :atomics.add(piece_count, 1, 1)
+        shape
+      end
+
+      # Use a real tick_time so pieces fall after robot stops
+      game = start_game(shape_provider: provider, width: 10, height: 20, tick_time: 50)
+      # duration_sec: 0 means expire immediately
+      robot = start_robot(game, moves_per_tick: 20, duration_sec: 0)
+
+      # Small delay so the robot's started_at is definitely in the past
+      Process.sleep(10)
+
+      GameInstance.set_robot(game, robot)
+
+      # Give time for the notification to be processed
+      Process.sleep(50)
+
+      # Robot should have ignored the notification — move_queue should be empty
+      robot_state = :sys.get_state(robot)
+      assert robot_state.move_queue == []
+
+      # Robot should still be alive, just inactive
+      assert Process.alive?(robot)
+    end
+
+    test "robot plays during duration and stops after" do
+      piece_count = :atomics.new(1, signed: false)
+      :atomics.put(piece_count, 1, 0)
+
+      shape = %Shape{label: :square, coords: [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]}
+
+      provider = fn ->
+        :atomics.add(piece_count, 1, 1)
+        shape
+      end
+
+      game = start_game(shape_provider: provider, width: 10, height: 40)
+      # 1 second duration
+      robot = start_robot(game, moves_per_tick: 20, duration_sec: 1)
+
+      GameInstance.set_robot(game, robot)
+      assert :ok = wait_for_placement(game)
+
+      # Robot should have placed pieces during the active period
+      pieces_before_expiry = :atomics.get(piece_count, 1)
+      assert pieces_before_expiry > 1
+
+      # Wait for duration to expire
+      Process.sleep(1100)
+
+      # Record piece count after expiry wait
+      pieces_after_expiry = :atomics.get(piece_count, 1)
+
+      # Send a new piece notification manually to test that robot ignores it
+      game_state = :sys.get_state(game)
+      GenServer.cast(robot, {:new_piece, %{
+        field: game_state.field,
+        shape: game_state.current_shape,
+        shape_coords: game_state.current_shape_coords,
+        tick_time: game_state.tick_time
+      }})
+
+      Process.sleep(50)
+
+      # No new pieces should have been placed by the robot after expiry
+      pieces_final = :atomics.get(piece_count, 1)
+      assert pieces_final == pieces_after_expiry
+
+      # Robot process is still alive
+      assert Process.alive?(robot)
+    end
+  end
+
   describe "pure functions" do
     test "evaluate_board prefers fewer holes" do
       {:ok, field_clean} = Field.new(4, 4)

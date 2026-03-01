@@ -14,28 +14,34 @@ defmodule Tetris.GameRobot do
             moves_per_tick: 3,
             move_queue: [],
             tick_time: 1000,
-            timer_ref: nil
+            timer_ref: nil,
+            duration_sec: nil,
+            started_at: nil
 
   # --- Public API ---
 
   def start_link(opts) do
     game_pid = Keyword.fetch!(opts, :game_pid)
     moves_per_tick = Keyword.get(opts, :moves_per_tick, 3)
+    duration_sec = Keyword.get(opts, :duration_sec, nil)
 
     GenServer.start_link(__MODULE__, %{
       game_pid: game_pid,
-      moves_per_tick: moves_per_tick
+      moves_per_tick: moves_per_tick,
+      duration_sec: duration_sec
     })
   end
 
   # --- Callbacks ---
 
   @impl true
-  def init(%{game_pid: game_pid, moves_per_tick: moves_per_tick}) do
+  def init(%{game_pid: game_pid, moves_per_tick: moves_per_tick, duration_sec: duration_sec}) do
     {:ok,
      %__MODULE__{
        game_pid: game_pid,
-       moves_per_tick: moves_per_tick
+       moves_per_tick: moves_per_tick,
+       duration_sec: duration_sec,
+       started_at: System.monotonic_time(:second)
      }}
   end
 
@@ -43,13 +49,17 @@ defmodule Tetris.GameRobot do
   def handle_cast({:new_piece, data}, state) do
     if state.timer_ref, do: Process.cancel_timer(state.timer_ref)
 
-    %{field: field, shape: shape, shape_coords: {start_x, _start_y}, tick_time: tick_time} = data
+    if expired?(state) do
+      {:noreply, %{state | move_queue: [], timer_ref: nil}}
+    else
+      %{field: field, shape: shape, shape_coords: {start_x, _start_y}, tick_time: tick_time} = data
 
-    moves = compute_move_sequence(field, shape, start_x)
+      moves = compute_move_sequence(field, shape, start_x)
 
-    new_state = %{state | move_queue: moves, tick_time: tick_time, timer_ref: nil}
-    new_state = execute_batch(new_state)
-    {:noreply, new_state}
+      new_state = %{state | move_queue: moves, tick_time: tick_time, timer_ref: nil}
+      new_state = execute_batch(new_state)
+      {:noreply, new_state}
+    end
   end
 
   @impl true
@@ -102,6 +112,12 @@ defmodule Tetris.GameRobot do
     catch
       :exit, _ -> {:error, :game_exited}
     end
+  end
+
+  defp expired?(%__MODULE__{duration_sec: nil}), do: false
+
+  defp expired?(%__MODULE__{duration_sec: duration_sec, started_at: started_at}) do
+    System.monotonic_time(:second) - started_at >= duration_sec
   end
 
   defp schedule_next_batch(:infinity) do
