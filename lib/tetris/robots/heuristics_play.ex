@@ -1,4 +1,4 @@
-defmodule Tetris.GameRobot do
+defmodule Tetris.Robots.HeuristicsPlay do
   @moduledoc """
   An automated Tetris player that receives new-piece notifications from
   `GameInstance`, computes optimal placements using heuristic board evaluation,

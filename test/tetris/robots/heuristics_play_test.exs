@@ -1,13 +1,13 @@
-defmodule Tetris.GameRobotTest do
+defmodule Tetris.Robots.HeuristicsPlayTest do
   use ExUnit.Case
 
   alias Tetris.GameInstance
-  alias Tetris.GameRobot
+  alias Tetris.Robots.HeuristicsPlay
   alias Tetris.Core.Field
   alias Tetris.Core.Shape
   alias Tetris.Core.ShapeRepository
 
-  defp start_game(opts \\ []) do
+  defp start_game(opts) do
     game_id = System.unique_integer([:positive])
     opts = Keyword.merge([game_id: game_id, tick_time: :infinity], opts)
     start_supervised!({GameInstance, opts})
@@ -19,7 +19,7 @@ defmodule Tetris.GameRobotTest do
 
       game = start_game(
         shape_provider: fn -> shape end,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       state = :sys.get_state(game)
@@ -38,7 +38,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       assert :ok = wait_for_placement(game)
@@ -62,7 +62,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: provider,
         width: 10,
         height: 20,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       # Let robot play several pieces
@@ -88,7 +88,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {GameRobot, [moves_per_tick: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 1]}
       )
 
       # With moves_per_tick=1, robot should still complete eventually
@@ -108,7 +108,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       Process.sleep(200)
@@ -137,7 +137,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: provider,
         width: 10,
         height: 40,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       # Wait long enough for 10+ pieces
@@ -159,7 +159,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: fn -> shape end,
         width: 4,
         height: 6,
-        robotic_play: {GameRobot, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
       )
 
       # Small board should eventually cause game over
@@ -191,7 +191,7 @@ defmodule Tetris.GameRobotTest do
         width: 10,
         height: 20,
         # Very slow rate to test cancellation
-        robotic_play: {GameRobot, [moves_per_tick: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 1]}
       )
 
       Process.sleep(300)
@@ -213,7 +213,7 @@ defmodule Tetris.GameRobotTest do
           width: 10,
           height: 40,
           shape_provider: fn -> shape end,
-          robotic_play: {GameRobot, [moves_per_tick: 20]}
+          robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
         )
 
         assert :ok = wait_for_placement(game),
@@ -236,7 +236,7 @@ defmodule Tetris.GameRobotTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: nil]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: nil]}
       )
 
       assert :ok = wait_for_placement(game)
@@ -260,7 +260,7 @@ defmodule Tetris.GameRobotTest do
         height: 20,
         tick_time: 50,
         # duration_sec: 0 means expire immediately
-        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: 0]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: 0]}
       )
 
       # Give time for the notification to be processed
@@ -293,7 +293,7 @@ defmodule Tetris.GameRobotTest do
         width: 10,
         height: 40,
         # 1 second duration
-        robotic_play: {GameRobot, [moves_per_tick: 20, duration_sec: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: 1]}
       )
 
       assert :ok = wait_for_placement(game)
@@ -345,50 +345,50 @@ defmodule Tetris.GameRobotTest do
 
       field_holey = %{field_holey | cells: holey_cells}
 
-      score_clean = GameRobot.evaluate_board(field_clean, 0)
-      score_holey = GameRobot.evaluate_board(field_holey, 0)
+      score_clean = HeuristicsPlay.evaluate_board(field_clean, 0)
+      score_holey = HeuristicsPlay.evaluate_board(field_holey, 0)
 
       assert score_clean > score_holey
     end
 
     test "evaluate_board rewards cleared lines" do
       {:ok, field} = Field.new(4, 4)
-      score_no_clear = GameRobot.evaluate_board(field, 0)
-      score_one_clear = GameRobot.evaluate_board(field, 1)
+      score_no_clear = HeuristicsPlay.evaluate_board(field, 0)
+      score_one_clear = HeuristicsPlay.evaluate_board(field, 1)
 
       assert score_one_clear > score_no_clear
     end
 
     test "build_moves generates correct rotation and shift sequence" do
-      moves = GameRobot.build_moves(2, 5, 3)
+      moves = HeuristicsPlay.build_moves(2, 5, 3)
       assert moves == [:rotate_cw, :rotate_cw, :shift_left, :shift_left, :drop]
     end
 
     test "build_moves with no rotation or shift" do
-      moves = GameRobot.build_moves(0, 5, 5)
+      moves = HeuristicsPlay.build_moves(0, 5, 5)
       assert moves == [:drop]
     end
 
     test "build_moves with right shifts" do
-      moves = GameRobot.build_moves(1, 3, 6)
+      moves = HeuristicsPlay.build_moves(1, 3, 6)
       assert moves == [:rotate_cw, :shift_right, :shift_right, :shift_right, :drop]
     end
 
     test "unique_rotations returns 1 rotation for square" do
       {:ok, square} = ShapeRepository.fetch_by_label(:square)
-      rotations = GameRobot.unique_rotations(square)
+      rotations = HeuristicsPlay.unique_rotations(square)
       assert length(rotations) == 1
     end
 
     test "unique_rotations returns 2 rotations for stick" do
       {:ok, stick} = ShapeRepository.fetch_by_label(:stick)
-      rotations = GameRobot.unique_rotations(stick)
+      rotations = HeuristicsPlay.unique_rotations(stick)
       assert length(rotations) == 2
     end
 
     test "unique_rotations returns 2 rotations for s-shapes" do
       {:ok, s} = ShapeRepository.fetch_by_label(:s)
-      rotations = GameRobot.unique_rotations(s)
+      rotations = HeuristicsPlay.unique_rotations(s)
       assert length(rotations) == 2
     end
 
@@ -396,7 +396,7 @@ defmodule Tetris.GameRobotTest do
       {:ok, field} = Field.new(10, 20)
       {:ok, stick} = ShapeRepository.fetch_by_label(:stick)
 
-      placements = GameRobot.enumerate_placements(field, stick)
+      placements = HeuristicsPlay.enumerate_placements(field, stick)
       assert length(placements) > 0
 
       # Each placement has {num_rotations, x, score}
