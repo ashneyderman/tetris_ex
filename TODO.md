@@ -19,3 +19,11 @@ What are the possible moves:
 {:user, <time_offset>, :shift, :left}
 {:user, <time_offset>, :shift, :left}
 {:game, <time_offset>, :capture_shape}
+
+3. Transcriber types are too general:
+   @type event :: tuple()
+   @type state :: term()
+
+We need to define those more specifically, and events need to move to structures.
+
+4. Renderer interface is too console specific. The interface needs to be more like the transcriber with the lifecycle methods to start with.
