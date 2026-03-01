@@ -11,7 +11,7 @@ defmodule Tetris.Robots.HeuristicsPlay do
   alias Tetris.GameInstance
 
   defstruct game_pid: nil,
-            moves_per_tick: 3,
+            moves_per_tick: 1,
             move_queue: [],
             tick_time: 1000,
             timer_ref: nil,
