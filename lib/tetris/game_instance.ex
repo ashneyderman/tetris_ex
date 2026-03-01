@@ -32,7 +32,8 @@ defmodule Tetris.GameInstance do
             renderer: nil,
             transcriber: nil,
             start_time: nil,
-            shape_provider: nil
+            shape_provider: nil,
+            robot: nil
 
   def start_link(opts) do
     game_id = Keyword.get(opts, :game_id, 0)
@@ -61,6 +62,10 @@ defmodule Tetris.GameInstance do
 
   def status(pid_or_name) do
     GenServer.call(pid_or_name, :status)
+  end
+
+  def set_robot(pid_or_name, robot_pid) do
+    GenServer.call(pid_or_name, {:set_robot, robot_pid})
   end
 
   # --- Callbacks ---
@@ -117,6 +122,7 @@ defmodule Tetris.GameInstance do
     tick_ref = maybe_schedule_tick(tick_time)
     new_state = %{state | tick_ref: tick_ref, status: :live}
     maybe_render(new_state)
+    maybe_notify_robot(new_state)
     {:noreply, new_state}
   end
 
@@ -204,6 +210,7 @@ defmodule Tetris.GameInstance do
         }
 
       maybe_render(new_state)
+      maybe_notify_robot(new_state)
       {:reply, :ok, new_state}
     end
   end
@@ -240,6 +247,12 @@ defmodule Tetris.GameInstance do
 
   def handle_call(:status, _from, %__MODULE__{status: status} = state) do
     {:reply, status, state}
+  end
+
+  def handle_call({:set_robot, robot_pid}, _from, state) do
+    new_state = %{state | robot: robot_pid}
+    maybe_notify_robot(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -289,6 +302,7 @@ defmodule Tetris.GameInstance do
           }
 
         maybe_render(new_state)
+        maybe_notify_robot(new_state)
         {:noreply, new_state}
       end
     end
@@ -311,6 +325,17 @@ defmodule Tetris.GameInstance do
 
   defp game_over?(%Shape{coords: coords}, _offset_x, offset_y) do
     Enum.any?(coords, fn [_x, y] -> round(y + offset_y + 0.1) <= 0 end)
+  end
+
+  defp maybe_notify_robot(%__MODULE__{robot: nil}), do: :ok
+
+  defp maybe_notify_robot(%__MODULE__{} = state) do
+    GenServer.cast(state.robot, {:new_piece, %{
+      field: state.field,
+      shape: state.current_shape,
+      shape_coords: state.current_shape_coords,
+      tick_time: state.tick_time
+    }})
   end
 
   defp maybe_render(%__MODULE__{renderer: renderer} = state) do
