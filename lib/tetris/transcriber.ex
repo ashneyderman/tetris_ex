@@ -12,7 +12,10 @@ defmodule Tetris.Transcriber do
 
   @callback init(opts :: keyword()) :: {:ok, state()} | {:error, term()}
   @callback record(event(), state()) :: {:ok, state()}
+  @callback stream(opts :: keyword()) :: Enumerable.t()
   @callback finalize(state()) :: :ok
+
+  @optional_callbacks [stream: 1]
 
   @doc """
   Records an event when a transcriber is configured, no-ops otherwise.

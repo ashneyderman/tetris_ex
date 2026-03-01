@@ -4,6 +4,15 @@ defmodule Tetris.GameInstance do
   shape's coordinates as it is falling inside the field. It also processes commands
   that are issued by the system such as `tick` or by user action such as key press
   that causes shape rotation or the shape drop to the bottom of the field.
+
+  Example usage:
+    iex> Tetris.GameInstance.start_link(
+           width: 15,
+           height: 35,
+           tick_time: 100,
+           renderer: Tetris.Renderer.PrettyPrint,
+           transcriber: {Tetris.Transcriber.File, path: "/tmp/my_game_transcript1.txt"}
+         )
   """
   use GenServer
 
@@ -92,7 +101,12 @@ defmodule Tetris.GameInstance do
       shape_provider: shape_provider
     }
 
-    state = maybe_transcribe(state, {:game, :offset, :init, %{width: width, height: height, tick_time: tick_time}})
+    state =
+      maybe_transcribe(
+        state,
+        {:game, :offset, :init, %{width: width, height: height, tick_time: tick_time}}
+      )
+
     state = maybe_transcribe(state, {:game, :offset, :new, shape.label, {x, y}})
 
     {:ok, state, {:continue, :start_tick}}
@@ -179,13 +193,14 @@ defmodule Tetris.GameInstance do
       new_tick_ref = maybe_schedule_tick(tick_time)
 
       new_state =
-        %{state |
-          field: new_field,
-          current_shape: new_shape,
-          current_shape_coords: {new_x, new_y},
-          tick_ref: new_tick_ref,
-          score: state.score + cleared * cleared,
-          rows_cleared: state.rows_cleared + cleared
+        %{
+          state
+          | field: new_field,
+            current_shape: new_shape,
+            current_shape_coords: {new_x, new_y},
+            tick_ref: new_tick_ref,
+            score: state.score + cleared * cleared,
+            rows_cleared: state.rows_cleared + cleared
         }
 
       maybe_render(new_state)
@@ -263,13 +278,14 @@ defmodule Tetris.GameInstance do
         tick_ref = maybe_schedule_tick(tick_time)
 
         new_state =
-          %{state |
-            field: new_field,
-            current_shape: new_shape,
-            current_shape_coords: {new_x, new_y},
-            tick_ref: tick_ref,
-            score: state.score + cleared * cleared,
-            rows_cleared: state.rows_cleared + cleared
+          %{
+            state
+            | field: new_field,
+              current_shape: new_shape,
+              current_shape_coords: {new_x, new_y},
+              tick_ref: tick_ref,
+              score: state.score + cleared * cleared,
+              rows_cleared: state.rows_cleared + cleared
           }
 
         maybe_render(new_state)
@@ -310,7 +326,10 @@ defmodule Tetris.GameInstance do
 
   defp maybe_transcribe(%__MODULE__{transcriber: nil} = state, _event), do: state
 
-  defp maybe_transcribe(%__MODULE__{transcriber: transcriber, start_time: start_time} = state, event) do
+  defp maybe_transcribe(
+         %__MODULE__{transcriber: transcriber, start_time: start_time} = state,
+         event
+       ) do
     event = put_time_offset(event, start_time)
     %{state | transcriber: Transcriber.maybe_record(transcriber, event)}
   end

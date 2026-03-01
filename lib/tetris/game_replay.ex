@@ -1,8 +1,16 @@
 defmodule Tetris.GameReplay do
   @moduledoc """
-  GenServer that replays a recorded transcript file, driving a renderer with
+  GenServer that replays a recorded transcript, driving a renderer with
   proper timing. Unlike GameInstance, GameReplay does not accept external API
   inputs — it autonomously walks through the recorded events.
+
+  Events are consumed lazily from a stream provided by a transcriber module.
+
+  Example usage:
+    iex> Tetris.GameReplay.start_link(
+           renderer: Tetris.Renderer.PrettyPrint,
+           transcriber: {Tetris.Transcriber.File, path: "/tmp/my_game_transcript1.txt"}
+         )
   """
   use GenServer
 
@@ -17,7 +25,8 @@ defmodule Tetris.GameReplay do
             score: 0,
             rows_cleared: 0,
             renderer: nil,
-            events: [],
+            next_event: nil,
+            stream_cont: nil,
             speed: 1.0,
             timer_ref: nil,
             last_offset: 0
@@ -31,43 +40,70 @@ defmodule Tetris.GameReplay do
 
   @impl true
   def init(opts) do
-    path = Keyword.fetch!(opts, :path)
+    {mod, transcriber_opts} = Keyword.fetch!(opts, :transcriber)
     renderer = Keyword.get(opts, :renderer, nil)
     speed = Keyword.get(opts, :speed, 1.0)
 
-    events = read_transcript(path)
+    stream = mod.stream(transcriber_opts)
 
     state = %__MODULE__{
       renderer: renderer,
-      speed: speed,
-      events: events
+      speed: speed
     }
 
-    {:ok, state, {:continue, :start_replay}}
+    {:ok, state, {:continue, {:start_replay, stream}}}
   end
 
   @impl true
-  def handle_continue(:start_replay, %__MODULE__{events: [first | rest]} = state) do
-    state = apply_event(first, %{state | events: rest, last_offset: event_offset(first)})
-    state = schedule_next(state)
-    {:noreply, state}
+  def handle_continue({:start_replay, stream}, state) do
+    case pull_event_from_stream(stream) do
+      {:event, first, cont} ->
+        state = apply_event(first, %{state | last_offset: event_offset(first)})
+
+        case pull_event_from_cont(cont) do
+          {:event, next, cont2} ->
+            state = %{state | next_event: next, stream_cont: cont2}
+            state = schedule_next(state)
+            {:noreply, state}
+
+          :done ->
+            {:stop, :normal, %{state | next_event: :done, stream_cont: nil}}
+        end
+
+      :done ->
+        {:stop, :normal, %{state | next_event: :done, stream_cont: nil}}
+    end
   end
 
   @impl true
-  def handle_info(:next_event, %__MODULE__{events: []} = state) do
+  def handle_info(:next_event, %__MODULE__{next_event: :done} = state) do
     {:stop, :normal, %{state | timer_ref: nil}}
   end
 
-  def handle_info(:next_event, %__MODULE__{events: [event | rest]} = state) do
-    state = apply_event(event, %{state | events: rest, last_offset: event_offset(event)})
+  def handle_info(:next_event, %__MODULE__{next_event: event, stream_cont: cont} = state) do
+    state = apply_event(event, %{state | last_offset: event_offset(event)})
     maybe_render(state)
 
     if state.status == :over do
-      {:stop, :normal, %{state | timer_ref: nil}}
+      halt_stream(cont)
+      {:stop, :normal, %{state | timer_ref: nil, next_event: :done, stream_cont: nil}}
     else
-      state = schedule_next(state)
-      {:noreply, state}
+      case pull_event_from_cont(cont) do
+        {:event, next, cont2} ->
+          state = %{state | next_event: next, stream_cont: cont2}
+          state = schedule_next(state)
+          {:noreply, state}
+
+        :done ->
+          {:stop, :normal, %{state | timer_ref: nil, next_event: :done, stream_cont: nil}}
+      end
     end
+  end
+
+  @impl true
+  def terminate(_reason, %__MODULE__{stream_cont: cont}) do
+    halt_stream(cont)
+    :ok
   end
 
   # --- Event processing ---
@@ -114,10 +150,11 @@ defmodule Tetris.GameReplay do
     {x, y} = state.current_shape_coords
     {cleared, new_field} = Field.capture(state.field, state.current_shape, x, y)
 
-    %{state |
-      field: new_field,
-      score: state.score + cleared * cleared,
-      rows_cleared: state.rows_cleared + cleared
+    %{
+      state
+      | field: new_field,
+        score: state.score + cleared * cleared,
+        rows_cleared: state.rows_cleared + cleared
     }
   end
 
@@ -125,17 +162,33 @@ defmodule Tetris.GameReplay do
     %{state | status: :over}
   end
 
-  # --- Private helpers ---
+  # --- Stream helpers ---
 
-  defp read_transcript(path) do
-    path
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.map(fn line ->
-      {term, _bindings} = Code.eval_string(line)
-      term
-    end)
+  defp pull_event_from_stream(stream) do
+    result =
+      Enumerable.reduce(stream, {:cont, nil}, fn event, _acc ->
+        {:suspend, event}
+      end)
+
+    case result do
+      {:suspended, event, cont} -> {:event, event, cont}
+      {:done, _acc} -> :done
+      {:halted, _acc} -> :done
+    end
   end
+
+  defp pull_event_from_cont(cont) do
+    case cont.({:cont, nil}) do
+      {:suspended, event, cont2} -> {:event, event, cont2}
+      {:done, _acc} -> :done
+      {:halted, _acc} -> :done
+    end
+  end
+
+  defp halt_stream(nil), do: :ok
+  defp halt_stream(cont), do: cont.({:halt, nil})
+
+  # --- Private helpers ---
 
   defp drop_to_bottom(field, shape, x, y) do
     new_y = y + 1
@@ -147,12 +200,12 @@ defmodule Tetris.GameReplay do
     end
   end
 
-  defp schedule_next(%__MODULE__{events: []} = state) do
+  defp schedule_next(%__MODULE__{next_event: :done} = state) do
     ref = Process.send_after(self(), :next_event, 0)
     %{state | timer_ref: ref}
   end
 
-  defp schedule_next(%__MODULE__{events: [next | _], last_offset: last, speed: speed} = state) do
+  defp schedule_next(%__MODULE__{next_event: next, last_offset: last, speed: speed} = state) do
     next_offset = event_offset(next)
     delay = max(round((next_offset - last) / speed), 0)
     ref = Process.send_after(self(), :next_event, delay)

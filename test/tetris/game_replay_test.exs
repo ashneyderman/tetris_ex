@@ -22,6 +22,10 @@ defmodule Tetris.GameReplayTest do
     path
   end
 
+  defp transcriber_for(path) do
+    {Tetris.Transcriber.File, [path: path]}
+  end
+
   defp simple_transcript do
     [
       {:game, 0, :init, %{width: 10, height: 20, tick_time: 1000}},
@@ -37,7 +41,7 @@ defmodule Tetris.GameReplayTest do
       path = write_transcript(tmp_dir, simple_transcript())
       game_id = System.unique_integer([:positive])
 
-      pid = start_supervised!({GameReplay, path: path, game_id: game_id, speed: 100.0})
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0})
 
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
@@ -47,7 +51,7 @@ defmodule Tetris.GameReplayTest do
       path = write_transcript(tmp_dir, simple_transcript())
       game_id = System.unique_integer([:positive])
 
-      pid = start_supervised!({GameReplay, path: path, game_id: game_id, speed: 100.0})
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0})
       assert pid == Process.whereis(:"replay_#{game_id}")
 
       ref = Process.monitor(pid)
@@ -71,7 +75,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -102,7 +106,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -133,7 +137,7 @@ defmodule Tetris.GameReplayTest do
 
       start = System.monotonic_time(:millisecond)
 
-      pid = start_supervised!({GameReplay, path: path, game_id: game_id, speed: 100.0})
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0})
 
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
@@ -162,7 +166,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -196,7 +200,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -229,7 +233,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -265,7 +269,7 @@ defmodule Tetris.GameReplayTest do
 
       pid =
         start_supervised!(
-          {GameReplay, path: path, game_id: game_id, speed: 100.0, renderer: TestRenderer}
+          {GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0, renderer: TestRenderer}
         )
 
       ref = Process.monitor(pid)
@@ -293,7 +297,7 @@ defmodule Tetris.GameReplayTest do
       path = write_transcript(tmp_dir, events)
       game_id = System.unique_integer([:positive])
 
-      pid = start_supervised!({GameReplay, path: path, game_id: game_id, speed: 100.0})
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0})
 
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
@@ -309,10 +313,33 @@ defmodule Tetris.GameReplayTest do
       path = write_transcript(tmp_dir, events)
       game_id = System.unique_integer([:positive])
 
-      pid = start_supervised!({GameReplay, path: path, game_id: game_id, speed: 100.0})
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 100.0})
 
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
+    end
+  end
+
+  describe "early termination" do
+    test "halts the stream when process is stopped early", %{tmp_dir: tmp_dir} do
+      events = [
+        {:game, 0, :init, %{width: 10, height: 20}},
+        {:game, 0, :new, :square, {4, -1}},
+        {:game, 1_000_000, :tick},
+        {:game, 2_000_000, :game_over}
+      ]
+
+      path = write_transcript(tmp_dir, events)
+      game_id = System.unique_integer([:positive])
+
+      pid = start_supervised!({GameReplay, transcriber: transcriber_for(path), game_id: game_id, speed: 1.0})
+
+      # Give it time to start and process init + new, then stop it
+      Process.sleep(100)
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid, :normal)
+      refute Process.alive?(pid)
     end
   end
 end
