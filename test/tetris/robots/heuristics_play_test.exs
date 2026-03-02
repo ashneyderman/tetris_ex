@@ -19,7 +19,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
 
       game = start_game(
         shape_provider: fn -> shape end,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       state = :sys.get_state(game)
@@ -38,7 +38,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       assert :ok = wait_for_placement(game)
@@ -62,7 +62,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: provider,
         width: 10,
         height: 20,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       # Let robot play several pieces
@@ -88,7 +88,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 1, disable_drop: false]}
       )
 
       # With moves_per_tick=1, robot should still complete eventually
@@ -108,7 +108,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       Process.sleep(200)
@@ -137,7 +137,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: provider,
         width: 10,
         height: 40,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       # Wait long enough for 10+ pieces
@@ -159,7 +159,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: fn -> shape end,
         width: 4,
         height: 6,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
       )
 
       # Small board should eventually cause game over
@@ -191,7 +191,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         width: 10,
         height: 20,
         # Very slow rate to test cancellation
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 1, disable_drop: false]}
       )
 
       Process.sleep(300)
@@ -213,7 +213,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
           width: 10,
           height: 40,
           shape_provider: fn -> shape end,
-          robotic_play: {HeuristicsPlay, [moves_per_tick: 20]}
+          robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false]}
         )
 
         assert :ok = wait_for_placement(game),
@@ -236,7 +236,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         shape_provider: fn -> shape end,
         width: 10,
         height: 20,
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: nil]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false, duration_sec: nil]}
       )
 
       assert :ok = wait_for_placement(game)
@@ -260,7 +260,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         height: 20,
         tick_time: 50,
         # duration_sec: 0 means expire immediately
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: 0]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false, duration_sec: 0]}
       )
 
       # Give time for the notification to be processed
@@ -293,7 +293,7 @@ defmodule Tetris.Robots.HeuristicsPlayTest do
         width: 10,
         height: 40,
         # 1 second duration
-        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, duration_sec: 1]}
+        robotic_play: {HeuristicsPlay, [moves_per_tick: 20, disable_drop: false, duration_sec: 1]}
       )
 
       assert :ok = wait_for_placement(game)

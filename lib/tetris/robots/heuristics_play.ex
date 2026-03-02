@@ -16,31 +16,35 @@ defmodule Tetris.Robots.HeuristicsPlay do
             tick_time: 1000,
             timer_ref: nil,
             duration_sec: nil,
+            disable_drop: true,
             started_at: nil
 
   # --- Public API ---
 
   def start_link(opts) do
     game_pid = Keyword.fetch!(opts, :game_pid)
-    moves_per_tick = Keyword.get(opts, :moves_per_tick, 3)
+    moves_per_tick = Keyword.get(opts, :moves_per_tick, 1)
     duration_sec = Keyword.get(opts, :duration_sec, nil)
+    disable_drop = Keyword.get(opts, :disable_drop, true)
 
     GenServer.start_link(__MODULE__, %{
       game_pid: game_pid,
       moves_per_tick: moves_per_tick,
-      duration_sec: duration_sec
+      duration_sec: duration_sec,
+      disable_drop: disable_drop
     })
   end
 
   # --- Callbacks ---
 
   @impl true
-  def init(%{game_pid: game_pid, moves_per_tick: moves_per_tick, duration_sec: duration_sec}) do
+  def init(%{game_pid: game_pid, moves_per_tick: moves_per_tick, duration_sec: duration_sec, disable_drop: disable_drop}) do
     {:ok,
      %__MODULE__{
        game_pid: game_pid,
        moves_per_tick: moves_per_tick,
        duration_sec: duration_sec,
+       disable_drop: disable_drop,
        started_at: System.monotonic_time(:second)
      }}
   end
@@ -55,6 +59,7 @@ defmodule Tetris.Robots.HeuristicsPlay do
       %{field: field, shape: shape, shape_coords: {start_x, _start_y}, tick_time: tick_time} = data
 
       moves = compute_move_sequence(field, shape, start_x)
+      moves = if state.disable_drop, do: List.delete(moves, :drop), else: moves
 
       new_state = %{state | move_queue: moves, tick_time: tick_time, timer_ref: nil}
       new_state = execute_batch(new_state)
