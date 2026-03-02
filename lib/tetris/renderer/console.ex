@@ -19,7 +19,8 @@ defmodule Tetris.Renderer.Console do
       current_shape_coords: {offset_x, offset_y},
       score: score,
       rows_cleared: rows_cleared,
-      status: status
+      status: status,
+      start_time: start_time
     } = data
 
     shape_cells = shape_cell_set(shape, offset_x, offset_y)
@@ -65,8 +66,9 @@ defmodule Tetris.Renderer.Console do
         "|" <> cells <> "|"
       end)
 
+    total_seconds_elapsed = round((System.monotonic_time(:millisecond) - start_time) / 1000)
     status_line = format_status(status)
-    score_line = "Score: #{score}  Rows: #{rows_cleared}"
+    score_line = "Score: #{score}  Rows: #{rows_cleared}  Time: #{total_seconds_elapsed} sec"
 
     output =
       IO.ANSI.clear() <>

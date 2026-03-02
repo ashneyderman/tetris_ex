@@ -335,12 +335,16 @@ defmodule Tetris.GameInstance do
   defp maybe_notify_robot(%__MODULE__{robot: nil}), do: :ok
 
   defp maybe_notify_robot(%__MODULE__{} = state) do
-    GenServer.cast(state.robot, {:new_piece, %{
-      field: state.field,
-      shape: state.current_shape,
-      shape_coords: state.current_shape_coords,
-      tick_time: state.tick_time
-    }})
+    GenServer.cast(
+      state.robot,
+      {:new_piece,
+       %{
+         field: state.field,
+         shape: state.current_shape,
+         shape_coords: state.current_shape_coords,
+         tick_time: state.tick_time
+       }}
+    )
   end
 
   defp maybe_render(%__MODULE__{renderer: renderer} = state) do
@@ -350,7 +354,8 @@ defmodule Tetris.GameInstance do
       current_shape_coords: state.current_shape_coords,
       score: state.score,
       rows_cleared: state.rows_cleared,
-      status: state.status
+      status: state.status,
+      start_time: state.start_time
     })
   end
 
