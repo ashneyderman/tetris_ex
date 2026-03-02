@@ -26,7 +26,22 @@ defmodule Tetris.Renderer.Console do
 
     border = "+" <> String.duplicate("--", field.width) <> "+"
 
-    rows =
+    above_rows =
+      for y <- -4..-1 do
+        cells =
+          for x <- 0..(field.width - 1) do
+            if MapSet.member?(shape_cells, {x, y}) do
+              IO.ANSI.cyan() <> "▓ " <> IO.ANSI.reset()
+            else
+              "  "
+            end
+          end
+          |> Enum.join()
+
+        " " <> cells
+      end
+
+    field_rows =
       field.cells
       |> Enum.with_index()
       |> Enum.map(fn {row, y} ->
@@ -56,7 +71,7 @@ defmodule Tetris.Renderer.Console do
     output =
       IO.ANSI.clear() <>
         IO.ANSI.home() <>
-        Enum.join([border | rows] ++ [border, status_line, score_line], "\n") <>
+        Enum.join(above_rows ++ field_rows ++ [border, status_line, score_line], "\n") <>
         "\n"
 
     IO.write(output)
